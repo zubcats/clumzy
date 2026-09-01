@@ -1,0 +1,50 @@
+# Push to main (or Run workflow) → Windows x64 zip with Clumzy.exe.
+# Same idea as ZubCut: GitHub builds it, you download the zip.
+
+name: Build Windows zip
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-zip-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build portable zip
+        shell: cmd
+        run: tools\build-windows.cmd
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clumzy-windows-x64
+          path: dist/Clumzy-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Publish rolling latest release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Clumzy latest
+          files: dist/Clumzy-windows-x64.zip
+          fail_on_unmatched_files: true
+          make_latest: true
+          body: |
+            Portable Windows x64 build.
+
+            Unzip, right-click **Clumzy.exe** → Run as administrator.
+            Keep `iup.dll`, `WinDivert.dll`, `WinDivert64.sys`, `config.txt`, and `presets.ini` next to the exe.
