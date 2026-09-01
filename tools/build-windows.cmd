@@ -40,7 +40,7 @@ link /nologo /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /SAFESEH:NO ^
   dist\obj\*.obj dist\clumzy.res ^
   /LIBPATH:external\WinDivert-2.2.0-A\x64 ^
   /LIBPATH:external\iup-3.30_Win64_dll16_lib ^
-  iup.lib WinDivert.lib comctl32.lib winmm.lib ws2_32.lib gdi32.lib comdlg32.lib uuid.lib ole32.lib kernel32.lib || exit /b 1
+  iup.lib WinDivert.lib comctl32.lib winmm.lib ws2_32.lib gdi32.lib comdlg32.lib uuid.lib ole32.lib kernel32.lib user32.lib advapi32.lib shell32.lib || exit /b 1
 
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll dist\stage\ || exit /b 1
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert64.sys dist\stage\ || exit /b 1
