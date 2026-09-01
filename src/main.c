@@ -1430,9 +1430,12 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     hWnd = (HWND)IupGetAttribute(ih, "HWND");
     hInstance = GetModuleHandle(NULL);
 
-    // set application icon
-    icon = LoadIcon(hInstance, "CLUMZY_ICON");
+    // Title bar wants a real 16x16; LoadIcon often stretches a padded 256 frame.
+    icon = (HICON)LoadImage(hInstance, "CLUMZY_ICON", IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
     SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)icon);
+    icon = (HICON)LoadImage(hInstance, "CLUMZY_ICON", IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
 
     exit = checkIsRunning();
