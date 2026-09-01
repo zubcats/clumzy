@@ -1,9 +1,8 @@
-"""Build etc/clumzy-icon.ico as square BMP frames Windows can show in the title bar.
+"""Build etc/clumzy-icon.ico plus the in-app logo C arrays.
 
-The Zub mark is wider than it is tall. Stretching that into a tiny square (or
-letting LoadIcon downscale a padded 256px PNG) makes a yellow sliver. This
-letterboxes the real glyph into a square and writes uncompressed ICO images
-for 16/32, which LoadImage can select correctly.
+The Zub ZC mark is wider than it is tall and sits in a square PNG with a lot of
+empty margin. Crop the full mark (both letters), letterbox it into a square, and
+write uncompressed ICO frames Windows can pick at title-bar / taskbar sizes.
 """
 from __future__ import annotations
 
@@ -15,15 +14,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "etc" / "zub-logo.png"
 OUT = ROOT / "etc" / "clumzy-icon.ico"
+PREVIEW_DIR = ROOT / "dist"
 
 # Title bar / taskbar first. 256 last for Explorer.
 SIZES = (16, 20, 24, 32, 48, 64, 256)
+# Breathing room around the glow so the square does not clip the ZC.
+PAD_FRAC = 0.08
 
 
 def _load_png_rgba(path: Path) -> tuple[int, int, bytes]:
     import subprocess
 
-    # Prefer Pillow; fall back to .NET so CI/local both work.
     try:
         from PIL import Image
 
@@ -103,13 +104,14 @@ def _decode_png(data: bytes) -> tuple[int, int, bytes]:
 
 
 def _bbox(w: int, h: int, rgba: bytes) -> tuple[int, int, int, int]:
+    """Bounds of the full ZC, including yellow glow that may have alpha 0."""
     minx, miny, maxx, maxy = w, h, -1, -1
     for y in range(h):
         row = y * w * 4
         for x in range(w):
             i = row + x * 4
-            r, g, b, a = rgba[i : i + 4]
-            if a > 20 and (r > 30 or g > 30):
+            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
+            if a > 16 or r > 24 or g > 20:
                 if x < minx:
                     minx = x
                 if y < miny:
@@ -142,68 +144,68 @@ def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int,
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy)
 
 
-def _left_glyph_box(w: int, h: int, rgba: bytes) -> tuple[int, int, int, int]:
-    """Bounds of the Z only. The full ZC is wide; a square window icon must not include the C."""
+def _letterbox_square(
+    w: int, h: int, rgba: bytes, size: int, *, flatten: bool
+) -> bytes:
     x0, y0, x1, y1 = _bbox(w, h, rgba)
-    best_x, best_n = x0 + (x1 - x0) // 2, 10**9
-    mid0 = x0 + int((x1 - x0) * 0.35)
-    mid1 = x0 + int((x1 - x0) * 0.65)
-    for x in range(mid0, mid1):
-        n = 0
-        for y in range(y0, y1):
-            i = (y * w + x) * 4
-            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
-            if a > 20 and (r > 30 or g > 30):
-                n += 1
-        if n < best_n:
-            best_n, best_x = n, x
-    zx0, zy0, zx1, zy1 = w, h, -1, -1
-    for y in range(y0, y1):
-        for x in range(x0, best_x):
-            i = (y * w + x) * 4
-            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
-            if a > 20 and (r > 30 or g > 30):
-                if x < zx0:
-                    zx0 = x
-                if y < zy0:
-                    zy0 = y
-                if x > zx1:
-                    zx1 = x
-                if y > zy1:
-                    zy1 = y
-    if zx1 < 0:
-        return x0, y0, x0 + (x1 - x0) // 2, y1
-    return zx0, zy0, zx1 + 1, zy1 + 1
-
-
-def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
-    x0, y0, x1, y1 = _left_glyph_box(w, h, rgba)
     bw, bh = max(1, x1 - x0), max(1, y1 - y0)
-    side = int(max(bw, bh) * 1.06)
+    side = max(bw, bh) * (1.0 + 2.0 * PAD_FRAC)
     cx = (x0 + x1) / 2.0
     cy = (y0 + y1) / 2.0
     left = cx - side / 2.0
     top = cy - side / 2.0
-    out = bytearray(size * size * 4)
-    scale = side / float(size)
-    for y in range(size):
-        sy = top + (y + 0.5) * scale
-        for x in range(size):
-            sx = left + (x + 0.5) * scale
-            r, g, b, a = _sample(rgba, w, h, sx, sy)
-            i = (y * size + x) * 4
-            out[i : i + 4] = bytes((r, g, b, a))
-    return _flatten_on_black(bytes(out), size)
+    try:
+        from PIL import Image
+
+        src = Image.frombytes("RGBA", (w, h), rgba)
+        crop = (
+            int(round(left)),
+            int(round(top)),
+            int(round(left + side)),
+            int(round(top + side)),
+        )
+        master = Image.new("RGBA", (crop[2] - crop[0], crop[3] - crop[1]), (0, 0, 0, 0))
+        src_crop = src.crop(crop)
+        master.paste(src_crop, (0, 0))
+        resized = master.resize((size, size), Image.Resampling.LANCZOS)
+        out = bytearray(resized.tobytes())
+    except ImportError:
+        out = bytearray(size * size * 4)
+        scale = side / float(size)
+        for y in range(size):
+            sy = top + (y + 0.5) * scale
+            for x in range(size):
+                sx = left + (x + 0.5) * scale
+                r, g, b, a = _sample(rgba, w, h, sx, sy)
+                i = (y * size + x) * 4
+                out[i : i + 4] = bytes((r, g, b, a))
+    if flatten:
+        return _flatten_on_black(bytes(out), size)
+    return _restore_glow_alpha(bytes(out), size)
+
+
+def _restore_glow_alpha(rgba: bytes, size: int) -> bytes:
+    """Source glow is often RGB with alpha 0. Give those pixels a visible alpha."""
+    out = bytearray(rgba)
+    for i in range(size * size):
+        r, g, b, a = out[i * 4 : i * 4 + 4]
+        if a == 0 and (r > 16 or g > 12):
+            out[i * 4 + 3] = max(r, g, b)
+    return bytes(out)
 
 
 def _flatten_on_black(rgba: bytes, size: int) -> bytes:
-    """PNG glow is often RGB-with-zero-alpha. Force a solid black tile so the
-    taskbar/title icon fills the square like neighboring apps."""
+    """Force a solid black tile so the taskbar/title icon fills the square."""
     out = bytearray(size * size * 4)
     for i in range(size * size):
         r, g, b, a = rgba[i * 4 : i * 4 + 4]
         if a > 32 or r > 24 or g > 20:
-            out[i * 4 : i * 4 + 4] = bytes((r, g, b, 255))
+            if a == 0:
+                a = 255
+            out[i * 4] = (r * a + 0 * (255 - a)) // 255
+            out[i * 4 + 1] = (g * a + 0 * (255 - a)) // 255
+            out[i * 4 + 2] = (b * a + 0 * (255 - a)) // 255
+            out[i * 4 + 3] = 255
         else:
             out[i * 4 : i * 4 + 4] = bytes((0, 0, 0, 255))
     return bytes(out)
@@ -253,27 +255,27 @@ def _write_ico(path: Path, images: list[tuple[int, bytes]]) -> None:
     path.write_bytes(b"".join([struct.pack("<HHH", 0, 1, count), *entries, *blobs]))
 
 
-def main() -> int:
-    if not SRC.is_file():
-        print(f"missing {SRC}", file=sys.stderr)
-        return 1
-    w, h, rgba = _load_png_rgba(SRC)
-    frames = [(s, _letterbox_square(w, h, rgba, s)) for s in SIZES]
-    _write_ico(OUT, frames)
-    app = next(px for s, px in frames if s == 32)
-    app_c = ROOT / "src" / "clumzy_appicon.c"
+def _write_c_rgba(
+    path: Path,
+    macro_w: str,
+    macro_h: str,
+    array_name: str,
+    fn_name: str,
+    size: int,
+    rgba: bytes,
+) -> None:
     lines = [
         '#include "iup.h"',
         "",
-        "#define CLUMZY_APPICON_W 32",
-        "#define CLUMZY_APPICON_H 32",
+        f"#define {macro_w} {size}",
+        f"#define {macro_h} {size}",
         "",
-        "static const unsigned char clumzy_appicon_rgba[CLUMZY_APPICON_W * CLUMZY_APPICON_H * 4] = {",
+        f"static const unsigned char {array_name}[{macro_w} * {macro_h} * 4] = {{",
     ]
-    for y in range(32):
+    for y in range(size):
         row = ", ".join(
-            f"0x{app[(y * 32 + x) * 4 + c]:02X}"
-            for x in range(32)
+            f"0x{rgba[(y * size + x) * 4 + c]:02X}"
+            for x in range(size)
             for c in range(4)
         )
         lines.append(f"    {row},")
@@ -281,15 +283,79 @@ def main() -> int:
         [
             "};",
             "",
-            "Ihandle *createClumzyAppIconImage(void) {",
-            "    return IupImageRGBA(CLUMZY_APPICON_W, CLUMZY_APPICON_H, clumzy_appicon_rgba);",
+            f"Ihandle *{fn_name}(void) {{",
+            f"    return IupImageRGBA({macro_w}, {macro_h}, {array_name});",
             "}",
             "",
         ]
     )
-    app_c.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_preview_png(path: Path, size: int, rgba: bytes) -> None:
+    try:
+        from PIL import Image
+
+        Image.frombytes("RGBA", (size, size), rgba).save(path)
+        return
+    except ImportError:
+        pass
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)
+        raw.extend(rgba[y * size * 4 : (y + 1) * size * 4])
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def main() -> int:
+    if not SRC.is_file():
+        print(f"missing {SRC}", file=sys.stderr)
+        return 1
+    w, h, rgba = _load_png_rgba(SRC)
+    frames = [(s, _letterbox_square(w, h, rgba, s, flatten=True)) for s in SIZES]
+    _write_ico(OUT, frames)
+    app = next(px for s, px in frames if s == 32)
+    _write_c_rgba(
+        ROOT / "src" / "clumzy_appicon.c",
+        "CLUMZY_APPICON_W",
+        "CLUMZY_APPICON_H",
+        "clumzy_appicon_rgba",
+        "createClumzyAppIconImage",
+        32,
+        app,
+    )
+    logo = _letterbox_square(w, h, rgba, 48, flatten=False)
+    _write_c_rgba(
+        ROOT / "src" / "clumzy_logo.c",
+        "CLUMZY_LOGO_W",
+        "CLUMZY_LOGO_H",
+        "clumzy_logo_rgba",
+        "createClumzyLogoImage",
+        48,
+        logo,
+    )
+    PREVIEW_DIR.mkdir(exist_ok=True)
+    for s, px in frames:
+        _write_preview_png(PREVIEW_DIR / f"icon-preview-{s}.png", s, px)
+    _write_preview_png(PREVIEW_DIR / "logo-preview-48.png", 48, logo)
     print(f"wrote {OUT} ({', '.join(str(s) for s, _ in frames)})")
-    print(f"wrote {app_c}")
+    print("wrote src/clumzy_appicon.c")
+    print("wrote src/clumzy_logo.c")
     return 0
 
 
