@@ -1337,6 +1337,8 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialog, "TITLE", APP_NAME " " CLUMSY_VERSION);
     IupSetAttribute(dialog, "SIZE", "480x"); // add padding manually to width
     IupSetAttribute(dialog, "RESIZE", "NO");
+    IupSetHandle("clumzy_appicon", createClumzyAppIconImage());
+    IupSetAttribute(dialog, "ICON", "clumzy_appicon");
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
 
 

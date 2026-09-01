@@ -192,6 +192,7 @@ BOOL tryElevate(HWND hWnd, BOOL silent);
 // icons
 extern const unsigned char icon8x8[8*8];
 Ihandle *createClumzyLogoImage(void);
+Ihandle *createClumzyAppIconImage(void);
 
 // parameterized
 extern BOOL parameterized;

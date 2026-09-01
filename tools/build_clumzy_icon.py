@@ -142,12 +142,44 @@ def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int,
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy)
 
 
-def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
+def _left_glyph_box(w: int, h: int, rgba: bytes) -> tuple[int, int, int, int]:
+    """Bounds of the Z only. The full ZC is wide; a square window icon must not include the C."""
     x0, y0, x1, y1 = _bbox(w, h, rgba)
+    best_x, best_n = x0 + (x1 - x0) // 2, 10**9
+    mid0 = x0 + int((x1 - x0) * 0.35)
+    mid1 = x0 + int((x1 - x0) * 0.65)
+    for x in range(mid0, mid1):
+        n = 0
+        for y in range(y0, y1):
+            i = (y * w + x) * 4
+            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
+            if a > 20 and (r > 30 or g > 30):
+                n += 1
+        if n < best_n:
+            best_n, best_x = n, x
+    zx0, zy0, zx1, zy1 = w, h, -1, -1
+    for y in range(y0, y1):
+        for x in range(x0, best_x):
+            i = (y * w + x) * 4
+            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
+            if a > 20 and (r > 30 or g > 30):
+                if x < zx0:
+                    zx0 = x
+                if y < zy0:
+                    zy0 = y
+                if x > zx1:
+                    zx1 = x
+                if y > zy1:
+                    zy1 = y
+    if zx1 < 0:
+        return x0, y0, x0 + (x1 - x0) // 2, y1
+    return zx0, zy0, zx1 + 1, zy1 + 1
+
+
+def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
+    x0, y0, x1, y1 = _left_glyph_box(w, h, rgba)
     bw, bh = max(1, x1 - x0), max(1, y1 - y0)
-    # Title-bar icons are square. Using the full wide mark letterboxed makes a
-    # yellow sliver at 16px. Square up on the glyph height so ZC fills the icon.
-    side = int(max(bh, bw * 0.55) * 1.12)
+    side = int(max(bw, bh) * 1.06)
     cx = (x0 + x1) / 2.0
     cy = (y0 + y1) / 2.0
     left = cx - side / 2.0
@@ -161,6 +193,19 @@ def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
             r, g, b, a = _sample(rgba, w, h, sx, sy)
             i = (y * size + x) * 4
             out[i : i + 4] = bytes((r, g, b, a))
+    return _flatten_on_black(bytes(out), size)
+
+
+def _flatten_on_black(rgba: bytes, size: int) -> bytes:
+    """PNG glow is often RGB-with-zero-alpha. Force a solid black tile so the
+    taskbar/title icon fills the square like neighboring apps."""
+    out = bytearray(size * size * 4)
+    for i in range(size * size):
+        r, g, b, a = rgba[i * 4 : i * 4 + 4]
+        if a > 32 or r > 24 or g > 20:
+            out[i * 4 : i * 4 + 4] = bytes((r, g, b, 255))
+        else:
+            out[i * 4 : i * 4 + 4] = bytes((0, 0, 0, 255))
     return bytes(out)
 
 
@@ -215,7 +260,36 @@ def main() -> int:
     w, h, rgba = _load_png_rgba(SRC)
     frames = [(s, _letterbox_square(w, h, rgba, s)) for s in SIZES]
     _write_ico(OUT, frames)
+    app = next(px for s, px in frames if s == 32)
+    app_c = ROOT / "src" / "clumzy_appicon.c"
+    lines = [
+        '#include "iup.h"',
+        "",
+        "#define CLUMZY_APPICON_W 32",
+        "#define CLUMZY_APPICON_H 32",
+        "",
+        "static const unsigned char clumzy_appicon_rgba[CLUMZY_APPICON_W * CLUMZY_APPICON_H * 4] = {",
+    ]
+    for y in range(32):
+        row = ", ".join(
+            f"0x{app[(y * 32 + x) * 4 + c]:02X}"
+            for x in range(32)
+            for c in range(4)
+        )
+        lines.append(f"    {row},")
+    lines.extend(
+        [
+            "};",
+            "",
+            "Ihandle *createClumzyAppIconImage(void) {",
+            "    return IupImageRGBA(CLUMZY_APPICON_W, CLUMZY_APPICON_H, clumzy_appicon_rgba);",
+            "}",
+            "",
+        ]
+    )
+    app_c.write_text("\n".join(lines), encoding="utf-8")
     print(f"wrote {OUT} ({', '.join(str(s) for s, _ in frames)})")
+    print(f"wrote {app_c}")
     return 0
 
 
