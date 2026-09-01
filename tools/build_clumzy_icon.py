@@ -1,8 +1,9 @@
 """Build etc/clumzy-icon.ico plus the in-app logo C arrays.
 
 The Zub ZC mark is wider than it is tall and sits in a square PNG with a lot of
-empty margin. Crop the full mark (both letters), letterbox it into a square, and
-write uncompressed ICO frames Windows can pick at title-bar / taskbar sizes.
+empty margin. Crop the full mark (both letters), letterbox it into a square with
+a transparent surround, and write uncompressed ICO frames Windows can pick at
+title-bar / taskbar sizes.
 """
 from __future__ import annotations
 
@@ -144,9 +145,7 @@ def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int,
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy)
 
 
-def _letterbox_square(
-    w: int, h: int, rgba: bytes, size: int, *, flatten: bool
-) -> bytes:
+def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
     x0, y0, x1, y1 = _bbox(w, h, rgba)
     bw, bh = max(1, x1 - x0), max(1, y1 - y0)
     side = max(bw, bh) * (1.0 + 2.0 * PAD_FRAC)
@@ -179,35 +178,24 @@ def _letterbox_square(
                 r, g, b, a = _sample(rgba, w, h, sx, sy)
                 i = (y * size + x) * 4
                 out[i : i + 4] = bytes((r, g, b, a))
-    if flatten:
-        return _flatten_on_black(bytes(out), size)
     return _restore_glow_alpha(bytes(out), size)
 
 
 def _restore_glow_alpha(rgba: bytes, size: int) -> bytes:
-    """Source glow is often RGB with alpha 0. Give those pixels a visible alpha."""
+    """Keep the ZC glow, punch the surround to real transparency.
+
+    Source glow is often RGB with alpha 0. Empty / near-black padding must stay
+    0,0,0,0 so the title bar and taskbar do not paint a black square.
+    """
     out = bytearray(rgba)
     for i in range(size * size):
         r, g, b, a = out[i * 4 : i * 4 + 4]
-        if a == 0 and (r > 16 or g > 12):
-            out[i * 4 + 3] = max(r, g, b)
-    return bytes(out)
-
-
-def _flatten_on_black(rgba: bytes, size: int) -> bytes:
-    """Force a solid black tile so the taskbar/title icon fills the square."""
-    out = bytearray(size * size * 4)
-    for i in range(size * size):
-        r, g, b, a = rgba[i * 4 : i * 4 + 4]
-        if a > 32 or r > 24 or g > 20:
-            if a == 0:
-                a = 255
-            out[i * 4] = (r * a + 0 * (255 - a)) // 255
-            out[i * 4 + 1] = (g * a + 0 * (255 - a)) // 255
-            out[i * 4 + 2] = (b * a + 0 * (255 - a)) // 255
-            out[i * 4 + 3] = 255
+        if a < 8 and (r > 16 or g > 12):
+            a = max(r, g, b)
+        if a < 16 and r < 20 and g < 16 and b < 16:
+            out[i * 4 : i * 4 + 4] = bytes((0, 0, 0, 0))
         else:
-            out[i * 4 : i * 4 + 4] = bytes((0, 0, 0, 255))
+            out[i * 4 + 3] = a
     return bytes(out)
 
 
@@ -235,8 +223,14 @@ def _rgba_to_dib(size: int, rgba: bytes) -> bytes:
             r, g, b, a = rgba[i : i + 4]
             xor[o : o + 4] = bytes((b, g, r, a))
     mask_row = ((size + 31) // 32) * 4
-    and_mask = bytes(mask_row * size)
-    return header + bytes(xor) + and_mask
+    and_mask = bytearray(mask_row * size)
+    for y in range(size):
+        src_y = size - 1 - y
+        for x in range(size):
+            a = rgba[(src_y * size + x) * 4 + 3]
+            if a < 16:
+                and_mask[y * mask_row + (x >> 3)] |= 0x80 >> (x & 7)
+    return header + bytes(xor) + bytes(and_mask)
 
 
 def _write_ico(path: Path, images: list[tuple[int, bytes]]) -> None:
@@ -292,6 +286,21 @@ def _write_c_rgba(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _on_checker(rgba: bytes, size: int) -> bytes:
+    out = bytearray(size * size * 4)
+    for y in range(size):
+        for x in range(size):
+            i = (y * size + x) * 4
+            r, g, b, a = rgba[i : i + 4]
+            cell = 200 if ((x // 4) + (y // 4)) % 2 == 0 else 120
+            ia = a / 255.0
+            out[i] = int(r * ia + cell * (1.0 - ia))
+            out[i + 1] = int(g * ia + cell * (1.0 - ia))
+            out[i + 2] = int(b * ia + cell * (1.0 - ia))
+            out[i + 3] = 255
+    return bytes(out)
+
+
 def _write_preview_png(path: Path, size: int, rgba: bytes) -> None:
     try:
         from PIL import Image
@@ -327,7 +336,7 @@ def main() -> int:
         print(f"missing {SRC}", file=sys.stderr)
         return 1
     w, h, rgba = _load_png_rgba(SRC)
-    frames = [(s, _letterbox_square(w, h, rgba, s, flatten=True)) for s in SIZES]
+    frames = [(s, _letterbox_square(w, h, rgba, s)) for s in SIZES]
     _write_ico(OUT, frames)
     app = next(px for s, px in frames if s == 32)
     _write_c_rgba(
@@ -339,7 +348,7 @@ def main() -> int:
         32,
         app,
     )
-    logo = _letterbox_square(w, h, rgba, 48, flatten=False)
+    logo = _letterbox_square(w, h, rgba, 48)
     _write_c_rgba(
         ROOT / "src" / "clumzy_logo.c",
         "CLUMZY_LOGO_W",
@@ -352,7 +361,13 @@ def main() -> int:
     PREVIEW_DIR.mkdir(exist_ok=True)
     for s, px in frames:
         _write_preview_png(PREVIEW_DIR / f"icon-preview-{s}.png", s, px)
+        _write_preview_png(
+            PREVIEW_DIR / f"icon-preview-{s}-check.png", s, _on_checker(px, s)
+        )
     _write_preview_png(PREVIEW_DIR / "logo-preview-48.png", 48, logo)
+    _write_preview_png(
+        PREVIEW_DIR / "logo-preview-48-check.png", 48, _on_checker(logo, 48)
+    )
     print(f"wrote {OUT} ({', '.join(str(s) for s, _ in frames)})")
     print("wrote src/clumzy_appicon.c")
     print("wrote src/clumzy_logo.c")
