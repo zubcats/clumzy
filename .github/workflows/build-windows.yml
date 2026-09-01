@@ -31,11 +31,11 @@ jobs:
         shell: cmd
         run: tools\build-windows.cmd
 
-      - name: Upload zip
+      - name: Upload portable build
         uses: actions/upload-artifact@v4
         with:
           name: Clumzy-windows-x64
-          path: dist/Clumzy-windows-x64.zip
+          path: dist/stage/*
           if-no-files-found: error
 
       - name: Publish rolling latest release
