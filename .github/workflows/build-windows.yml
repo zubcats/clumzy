@@ -23,6 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build portable zip
         shell: cmd
         run: tools\build-windows.cmd

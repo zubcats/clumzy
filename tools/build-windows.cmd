@@ -2,17 +2,27 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0.."
 
-set "VCVARS="
-for %%E in (Enterprise Professional Community BuildTools) do (
-  if exist "%ProgramFiles%\Microsoft Visual Studio\2022\%%E\VC\Auxiliary\Build\vcvars64.bat" (
-    set "VCVARS=%ProgramFiles%\Microsoft Visual Studio\2022\%%E\VC\Auxiliary\Build\vcvars64.bat"
+where cl >nul 2>&1
+if errorlevel 1 (
+  set "VCVARS="
+  for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+    if exist "%%i\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
   )
+  if not defined VCVARS (
+    for %%Y in (2022 2025 18) do (
+      for %%E in (Enterprise Professional Community BuildTools) do (
+        if exist "%ProgramFiles%\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat" (
+          set "VCVARS=%ProgramFiles%\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat"
+        )
+      )
+    )
+  )
+  if not defined VCVARS (
+    echo vcvars64.bat not found. Install Visual Studio with C++ tools.
+    exit /b 1
+  )
+  call "!VCVARS!" || exit /b 1
 )
-if not defined VCVARS (
-  echo vcvars64.bat not found. Install Visual Studio 2022 with C++ tools.
-  exit /b 1
-)
-call "%VCVARS%" || exit /b 1
 
 if exist dist rmdir /s /q dist
 mkdir dist\obj dist\stage || exit /b 1
