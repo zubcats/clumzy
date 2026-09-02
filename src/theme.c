@@ -52,15 +52,13 @@ static void stripVisualStyles(HWND hwnd) {
     }
 }
 
-static void styleFrame(Ihandle *frame) {
-    IupSetAttribute(frame, "BGCOLOR", UI_BG);
-    IupSetAttribute(frame, "TITLECOLOR", UI_ACCENT);
-    IupSetAttribute(frame, "TITLEBGCOLOR", UI_BG);
-    IupSetAttribute(frame, "TITLEALIGNMENT", "ALEFT");
-    IupSetAttribute(frame, "FRAME", "CROSSTITLE");
-    IupSetAttribute(frame, "FRAMECOLOR", UI_ACCENT);
-    IupSetAttribute(frame, "TITLELINECOLOR", UI_ACCENT);
-    IupSetAttribute(frame, "FRAMEWIDTH", "1");
+static void syncFrameTitle(Ihandle *box) {
+    Ihandle *title = (Ihandle*)IupGetAttribute(box, "__CLUMZY_FRAME_TITLE");
+    const char *text = IupGetAttribute(box, "TITLE");
+    if (title && text) {
+        IupStoreAttribute(title, "TITLE", text);
+        IupSetAttribute(title, "FGCOLOR", UI_ACCENT);
+    }
 }
 
 static void styleButton(Ihandle *btn) {
@@ -92,9 +90,15 @@ static void copyActionToFlat(Ihandle *ih) {
 }
 
 Ihandle *clumzyFrame(Ihandle *child) {
-    Ihandle *frame = IupFlatFrame(child);
-    styleFrame(frame);
-    return frame;
+    Ihandle *title = IupLabel("");
+    Ihandle *box = IupVbox(title, child, NULL);
+    IupSetAttribute(title, "FGCOLOR", UI_ACCENT);
+    IupSetInt(title, "__CLUMZY_FRAME_TITLE_LBL", 1);
+    IupSetAttribute(box, "NCMARGIN", "4x4");
+    IupSetAttribute(box, "NCGAP", "2x2");
+    IupSetInt(box, "__CLUMZY_FRAME", 1);
+    IupSetAttribute(box, "__CLUMZY_FRAME_TITLE", (char*)title);
+    return box;
 }
 
 Ihandle *clumzyButton(const char *title) {
