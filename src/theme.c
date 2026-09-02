@@ -2,9 +2,6 @@
 #include <windows.h>
 #include "theme.h"
 
-#define CLUMZY_LABEL "__CLUMZY_LABEL"
-#define CLUMZY_FG "__CLUMZY_FG"
-
 typedef HRESULT (WINAPI *SetWindowTheme_t)(HWND, LPCWSTR, LPCWSTR);
 typedef HRESULT (WINAPI *DwmSetWindowAttribute_t)(HWND, DWORD, LPCVOID, DWORD);
 typedef int (WINAPI *SetPreferredAppMode_t)(int);
@@ -80,50 +77,6 @@ static void styleButton(Ihandle *btn) {
     IupSetAttribute(btn, "SHOWBORDER", "YES");
 }
 
-static int isLabelButton(Ihandle *ih) {
-    return IupGetInt(ih, CLUMZY_LABEL);
-}
-
-static const char *labelFg(Ihandle *label, int enabled) {
-    const char *fg = IupGetAttribute(label, CLUMZY_FG);
-    if (fg && fg[0]) {
-        return enabled ? fg : UI_TEXT_MUTE;
-    }
-    return enabled ? UI_ACCENT : UI_SAGE;
-}
-
-static void styleLabelButton(Ihandle *label, int enabled) {
-    const char *fg = labelFg(label, enabled);
-    IupSetAttribute(label, CLUMZY_LABEL, "1");
-    IupSetAttribute(label, "BGCOLOR", UI_BG);
-    IupSetAttribute(label, "FGCOLOR", fg);
-    IupSetAttribute(label, "HLCOLOR", UI_BG);
-    IupSetAttribute(label, "PSCOLOR", UI_BG);
-    IupSetAttribute(label, "TEXTHLCOLOR", fg);
-    IupSetAttribute(label, "TEXTPSCOLOR", fg);
-    IupSetAttribute(label, "BORDERWIDTH", "0");
-    IupSetAttribute(label, "SHOWBORDER", "NO");
-    IupSetAttribute(label, "ALIGNMENT", "ALEFT:ACENTER");
-    IupSetAttribute(label, "CANFOCUS", "NO");
-    IupSetAttribute(label, "ACTIVE", "YES");
-}
-
-/* System checkbox does not fill the canvas; CHECKSIZE=0 does. */
-static void styleToggle(Ihandle *toggle, int enabled) {
-    IupSetAttribute(toggle, "CHECKSIZE", "0");
-    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
-    IupSetAttribute(toggle, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "HLCOLOR", UI_BG);
-    IupSetAttribute(toggle, "PSCOLOR", UI_BG);
-    IupSetAttribute(toggle, "TEXTHLCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "TEXTPSCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "BORDERWIDTH", "0");
-    IupSetAttribute(toggle, "SHOWBORDER", "NO");
-    IupSetAttribute(toggle, "ALIGNMENT", "ALEFT:ACENTER");
-    IupSetAttribute(toggle, "EXPAND", "NO");
-    IupSetAttribute(toggle, "ACTIVE", "YES");
-}
-
 static void styleText(Ihandle *ih, int enabled) {
     IupSetAttribute(ih, "READONLY", "NO");
     IupSetAttribute(ih, "ACTIVE", "YES");
@@ -151,26 +104,15 @@ Ihandle *clumzyButton(const char *title) {
 }
 
 Ihandle *clumzyToggle(const char *title) {
-    Ihandle *toggle = IupFlatToggle(title);
-    styleToggle(toggle, 1);
-    return toggle;
+    return IupToggle(title, NULL);
 }
 
 Ihandle *clumzyLabel(const char *title) {
-    Ihandle *label;
-    if (!title) {
-        label = IupLabel(NULL);
-        return label;
-    }
-    label = IupFlatButton(title);
-    styleLabelButton(label, 1);
-    return label;
+    return IupLabel(title);
 }
 
 Ihandle *clumzyList(void) {
-    Ihandle *list = IupList(NULL);
-    styleText(list, 1);
-    return list;
+    return IupList(NULL);
 }
 
 void clumzySetAction(Ihandle *ih, Icallback cb) {
@@ -229,7 +171,6 @@ static int ancestorEnabled(Ihandle *ih) {
     return 1;
 }
 
-/* Untheme IupText only. ComboBoxes stay themed — untheming them is a white box. */
 static void skinAfterMap(Ihandle *ih) {
     const char *cls;
     HWND hwnd;
@@ -306,21 +247,16 @@ static void themeOne(Ihandle *ih) {
         IupSetAttribute(ih, "BACKGROUND", UI_BG);
     } else if (strcmp(cls, "flatframe") == 0) {
         styleFrame(ih);
-    } else if (strcmp(cls, "label") == 0) {
-        IupSetAttribute(ih, "EXPAND", "NO");
+    } else if (strcmp(cls, "flatbutton") == 0) {
+        styleButton(ih);
+        copyActionToFlat(ih);
     } else if (strcmp(cls, "text") == 0) {
         styleText(ih, 1);
-    } else if (strcmp(cls, "list") == 0) {
-        styleText(ih, 1);
-    } else if (strcmp(cls, "flattoggle") == 0) {
-        styleToggle(ih, 1);
-        copyActionToFlat(ih);
-    } else if (strcmp(cls, "flatbutton") == 0) {
-        if (isLabelButton(ih)) {
-            styleLabelButton(ih, 1);
+    } else if (strcmp(cls, "label") == 0) {
+        if (IupGetAttribute(ih, "IMAGE")) {
+            IupSetAttribute(ih, "EXPAND", "NO");
         } else {
-            styleButton(ih);
-            copyActionToFlat(ih);
+            IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
         }
     }
 }
@@ -363,16 +299,14 @@ static void enableOne(Ihandle *ih, int enabled) {
     if (strcmp(cls, "text") == 0) {
         IupSetAttribute(ih, "CANFOCUS", "YES");
         styleText(ih, enabled);
-    } else if (strcmp(cls, "flattoggle") == 0) {
-        styleToggle(ih, enabled);
+    } else if (strcmp(cls, "toggle") == 0) {
+        IupSetAttribute(ih, "ACTIVE", "YES");
     } else if (strcmp(cls, "flatbutton") == 0) {
-        if (isLabelButton(ih)) {
-            styleLabelButton(ih, enabled);
-        } else {
-            styleButton(ih);
-            IupSetAttribute(ih, "ACTIVE", "YES");
-            IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-        }
+        styleButton(ih);
+        IupSetAttribute(ih, "ACTIVE", "YES");
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    } else if (strcmp(cls, "label") == 0 && !IupGetAttribute(ih, "IMAGE")) {
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
     }
 }
 

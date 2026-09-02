@@ -7,9 +7,6 @@
 
 #define IupFrame(child) clumzyFrame(child)
 #define IupButton(title, action) clumzyButton(title)
-#define IupToggle(title, action) clumzyToggle(title)
-#define IupLabel(title) clumzyLabel(title)
-#define IupList(action) clumzyList()
 
 #define APP_NAME "Clumzy"
 #define CLUMSY_VERSION "2.0"

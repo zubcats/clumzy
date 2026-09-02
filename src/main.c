@@ -1144,7 +1144,6 @@ void init(int argc, char* argv[]) {
     // this is so easy to get wrong so it's pretty worth noting in the program
     statusLabel = IupLabel("NOTICE: When capturing localhost (loopback) packets, you CAN'T include inbound criteria.\n"
         "Filters like 'udp' need to be 'udp and outbound' to work. See readme for more info.");
-    IupSetAttribute(statusLabel, "EXPAND", "HORIZONTAL");
     IupSetAttribute(statusLabel, "PADDING", "8x8");
 
     topFrame = IupFrame(
@@ -1301,7 +1300,6 @@ void init(int argc, char* argv[]) {
 
 
 
-    IupSetAttribute(label1, "EXPAND", "HORIZONTAL");
     IupSetAttribute(middleFrame, "TITLE", "Info");
     IupSetAttribute(middleFrame, "EXPAND", "HORIZONTAL");
 
