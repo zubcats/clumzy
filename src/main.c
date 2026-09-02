@@ -1250,16 +1250,18 @@ void init(int argc, char* argv[]) {
 
     IupSetAttribute(filterSelectList2, "VISIBLECOLUMNS", "15");
     IupSetAttribute(filterSelectList2, "DROPDOWN", "YES");
-    IupSetAttributes(filterSelectList2, "1=(Local)_This_Device, 2=(Remote)_Shared_Devices");
+    clumzySetListAttributes(filterSelectList2, "1=(Local)_This_Device, 2=(Remote)_Shared_Devices");
     IupSetAttribute(filterSelectList2, "VALUE", "2");
+    clumzySyncList(filterSelectList2);
     IupSetCallback(filterSelectList2, "ACTION", (Icallback)uiList2SelectCb);
 
     for (ix = 0; ix < filtersSize; ++ix) {
         char ixBuf[4];
         sprintf(ixBuf, "%d", ix+1); // ! staring from 1, following lua indexing
-        IupStoreAttribute(filterSelectList, ixBuf, filters[ix].filterName);
+        clumzyStoreListItem(filterSelectList, ixBuf, filters[ix].filterName);
     }
     IupSetAttribute(filterSelectList, "VALUE", "1");
+    clumzySyncList(filterSelectList);
 
     IupSetAttribute(filterSelectList3, "VALUE", "1");
     IupSetAttribute(filterSelectList4, "VALUE", "1");
@@ -1354,6 +1356,8 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialogVBox, "NCGAP", "4x2");
     applyClumzyTheme(dialog);
     clumzyRefreshControlsEnabled(dialog);
+    IupSetAttribute(label1, "__CLUMZY_FG", UI_TEXT);
+    IupSetAttribute(statusLabel, "__CLUMZY_FG", UI_TEXT_MUTE);
     IupSetAttribute(label1, "FGCOLOR", UI_TEXT);
     IupSetAttribute(statusLabel, "FGCOLOR", UI_TEXT_MUTE);
 
@@ -1675,11 +1679,8 @@ static int uiList3SelectCb(Ihandle* ih, char* text, int item, int state) {
         else if (strcmp(text, preset5.PresetName) == 0) {
             //preset5
             preset5_config();
-          
-
         }
-      
-
+        clumzySyncToggleImages(dialog);
     }
     return IUP_DEFAULT;
 }
@@ -2405,6 +2406,7 @@ static int uiFilterTextCb(Ihandle *ih)  {
     UNREFERENCED_PARAMETER(ih);
     // unselect list
     IupSetAttribute(filterSelectList, "VALUE", "0");
+    clumzySyncList(filterSelectList);
     return IUP_DEFAULT;
 }
 
@@ -2582,13 +2584,17 @@ int main(int argc, char* argv[]) {
     snprintf(attributes, len, "1=%s, 2=%s, 3=%s, 4=%s, 5=%s", preset1.PresetName, preset2.PresetName, preset3.PresetName, preset4.PresetName, preset5.PresetName);
 
     // Set the attributes
-    IupSetAttributes(filterSelectList3, attributes);
-    IupSetAttributes(filterSelectList4, "1=Toggle, 2=Timer");
-    IupSetAttributes(filterSelectList5, "1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12, 13=13, 14=14, 15=15, 16=16, 17=17, 18=18, 19=19, 20=20, 21=21, 22=22, 23=23, 24=24, 25=25, 26=26, 27=27, 28=28, 29=29, 30=30, 31=31, 32=32, 33=33, 34=34, 35=35, 36=36, 37=37, 38=38, 39=39, 40=40, 41=41, 42=42, 43=43, 44=44, 45=45, 46=46, 47=47, 48=48, 49=49, 50=50, 51=51, 52=52, 53=53, 54=54, 55=55, 56=56, 57=57, 58=58, 59=59, 60=60");
+    clumzySetListAttributes(filterSelectList3, attributes);
+    clumzySetListAttributes(filterSelectList4, "1=Toggle, 2=Timer");
+    clumzySetListAttributes(filterSelectList5, "1=1, 2=2, 3=3, 4=4, 5=5, 6=6, 7=7, 8=8, 9=9, 10=10, 11=11, 12=12, 13=13, 14=14, 15=15, 16=16, 17=17, 18=18, 19=19, 20=20, 21=21, 22=22, 23=23, 24=24, 25=25, 26=26, 27=27, 28=28, 29=29, 30=30, 31=31, 32=32, 33=33, 34=34, 35=35, 36=36, 37=37, 38=38, 39=39, 40=40, 41=41, 42=42, 43=43, 44=44, 45=45, 46=46, 47=47, 48=48, 49=49, 50=50, 51=51, 52=52, 53=53, 54=54, 55=55, 56=56, 57=57, 58=58, 59=59, 60=60");
 
     IupSetAttribute(filterSelectList5, "VALUE", "1");
+    clumzySyncList(filterSelectList3);
+    clumzySyncList(filterSelectList4);
+    clumzySyncList(filterSelectList5);
 
     preset1_config();
+    clumzySyncToggleImages(dialog);
 
 
    // IupSetAttribute(filterSelectList3, "VALUE", "1");

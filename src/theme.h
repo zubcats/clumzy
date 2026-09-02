@@ -32,3 +32,7 @@ void clumzyRefreshControlsEnabled(Ihandle *root);
 void clumzyLockText(Ihandle *ih, int locked);
 void clumzyApplyWindowDarkMode(void *hwnd);
 void clumzyOnMapped(Ihandle *ih);
+void clumzySyncToggleImages(Ihandle *ih);
+void clumzySyncList(Ihandle *ih);
+void clumzyStoreListItem(Ihandle *ih, const char *id, const char *text);
+void clumzySetListAttributes(Ihandle *ih, const char *attrs);
