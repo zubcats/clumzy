@@ -143,7 +143,7 @@ def _scale_to_fit(
         nh = max(1, int(round(h * scale)))
         resized = src.resize((nw, nh), Image.Resampling.LANCZOS)
         canvas.paste(resized, ((dw - nw) // 2, (dh - nh) // 2), resized)
-        return canvas.tobytes()
+        return _snap_binary(canvas.tobytes(), dw, dh, fill)
     except ImportError:
         pass
 
@@ -167,6 +167,21 @@ def _scale_to_fit(
             out[i + 1] = int(g * ia + fill[1] * (1.0 - ia))
             out[i + 2] = int(b * ia + fill[2] * (1.0 - ia))
             out[i + 3] = min(255, fill[3] + a)
+    return _snap_binary(bytes(out), dw, dh, fill)
+
+
+def _snap_binary(
+    rgba: bytes, dw: int, dh: int, fill: tuple[int, int, int, int]
+) -> bytes:
+    """Keep the original 1-bit white mark. Scale only; no grey smear."""
+    out = bytearray(rgba)
+    fr, fg, fb, fa = fill
+    for i in range(0, dw * dh * 4, 4):
+        r, g, b, a = out[i : i + 4]
+        if a >= 128 and (r + g + b) >= 384:
+            out[i : i + 4] = bytes((255, 255, 255, 255))
+        else:
+            out[i : i + 4] = bytes((fr, fg, fb, fa))
     return bytes(out)
 
 
@@ -250,7 +265,9 @@ def _write_c_rgba(
             "};",
             "",
             f"Ihandle *{fn_name}(void) {{",
-            f"    return IupImageRGBA({macro_w}, {macro_h}, {array_name});",
+            f"    Ihandle *img = IupImageRGBA({macro_w}, {macro_h}, {array_name});",
+            '    IupSetAttribute(img, "AUTOSCALE", "NO");',
+            "    return img;",
             "}",
             "",
         ]

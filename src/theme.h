@@ -20,5 +20,6 @@ Ihandle *clumzyFrame(Ihandle *child);
 Ihandle *clumzyButton(const char *title);
 Ihandle *clumzyToggle(const char *title);
 void clumzySetAction(Ihandle *ih, Icallback cb);
+void clumzyPinImageLabel(Ihandle *label, Ihandle *image, int pad);
 void applyClumzyGlobals(void);
 void applyClumzyTheme(Ihandle *root);

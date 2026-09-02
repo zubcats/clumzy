@@ -1205,7 +1205,8 @@ void init(int argc, char* argv[]) {
 
     // Construct the label text with the keybind variable
     snprintf(labelText, len, baseText, keybind);
-    IupSetHandle("clumzy_logo", createClumzyLogoImage());
+    Ihandle *logoImage = createClumzyLogoImage();
+    IupSetHandle("clumzy_logo", logoImage);
     middleFrame = IupFrame(
         infoHbox = IupHbox(
             logoLabel = IupLabel(NULL),
@@ -1214,7 +1215,7 @@ void init(int argc, char* argv[]) {
         )
     );
     IupSetAttribute(logoLabel, "IMAGE", "clumzy_logo");
-    IupSetAttribute(logoLabel, "PADDING", "4x4");
+    clumzyPinImageLabel(logoLabel, logoImage, 4);
     IupSetAttribute(infoHbox, "ALIGNMENT", "ACENTER");
     IupSetAttribute(infoHbox, "NCGAP", "8");
 
@@ -1240,10 +1241,6 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(topVbox, "NCMARGIN", "4x4");
     IupSetAttribute(topVbox, "NCGAP", "4x2");
     IupSetAttribute(controlHbox, "ALIGNMENT", "ACENTER");
-
-    // setup state icon
-    IupSetAttribute(stateIcon, "IMAGE", "none_icon");
-    IupSetAttribute(stateIcon, "PADDING", "4x");
 
     // fill in options and setup callback
     IupSetAttribute(filterSelectList, "VISIBLECOLUMNS", "24");
@@ -1283,15 +1280,20 @@ void init(int argc, char* argv[]) {
     noneIcon = IupImage(8, 8, icon8x8);
     doingIcon = IupImage(8, 8, icon8x8);
     errorIcon = IupImage(8, 8, icon8x8);
-    IupSetAttribute(noneIcon, "0", "BGCOLOR");
+    IupSetAttribute(noneIcon, "0", UI_BG);
     IupSetAttribute(noneIcon, "1", UI_TEXT_MUTE);
-    IupSetAttribute(doingIcon, "0", "BGCOLOR");
+    IupSetAttribute(doingIcon, "0", UI_BG);
     IupSetAttribute(doingIcon, "1", UI_ACCENT);
-    IupSetAttribute(errorIcon, "0", "BGCOLOR");
+    IupSetAttribute(errorIcon, "0", UI_BG);
     IupSetAttribute(errorIcon, "1", UI_ERROR);
+    IupSetAttribute(noneIcon, "AUTOSCALE", "NO");
+    IupSetAttribute(doingIcon, "AUTOSCALE", "NO");
+    IupSetAttribute(errorIcon, "AUTOSCALE", "NO");
     IupSetHandle("none_icon", noneIcon);
     IupSetHandle("doing_icon", doingIcon);
     IupSetHandle("error_icon", errorIcon);
+    IupSetAttribute(stateIcon, "IMAGE", "none_icon");
+    clumzyPinImageLabel(stateIcon, noneIcon, 4);
 
 
 
@@ -2418,7 +2420,7 @@ static void uiSetupModule(Module *module, Ihandle *parent) {
 
     // set default icon
     IupSetAttribute(icon, "IMAGE", "none_icon");
-    IupSetAttribute(icon, "PADDING", "4x");
+    clumzyPinImageLabel(icon, IupGetHandle("none_icon"), 4);
     module->iconHandle = icon;
 
     // parameterize toggle

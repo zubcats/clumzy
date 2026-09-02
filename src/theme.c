@@ -4,7 +4,6 @@
 Ihandle *clumzyFrame(Ihandle *child) {
     Ihandle *frame = IupFlatFrame(child);
     IupSetAttribute(frame, "BGCOLOR", UI_BG);
-    IupSetAttribute(frame, "FGCOLOR", UI_TEXT);
     IupSetAttribute(frame, "TITLECOLOR", UI_TEXT);
     IupSetAttribute(frame, "TITLEBGCOLOR", UI_BG);
     IupSetAttribute(frame, "TITLEALIGNMENT", "ALEFT");
@@ -32,17 +31,9 @@ Ihandle *clumzyButton(const char *title) {
 }
 
 Ihandle *clumzyToggle(const char *title) {
-    Ihandle *toggle = IupFlatToggle(title);
-    IupSetAttribute(toggle, "ALIGNMENT", "ALEFT:ACENTER");
-    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
+    Ihandle *toggle = IupToggle(title, NULL);
     IupSetAttribute(toggle, "FGCOLOR", UI_TEXT);
-    IupSetAttribute(toggle, "HLCOLOR", UI_BG);
-    IupSetAttribute(toggle, "PSCOLOR", UI_BG);
-    IupSetAttribute(toggle, "TEXTHLCOLOR", UI_TEXT);
-    IupSetAttribute(toggle, "TEXTPSCOLOR", UI_TEXT);
-    IupSetAttribute(toggle, "BORDERCOLOR", UI_BG);
-    IupSetAttribute(toggle, "BORDERWIDTH", "0");
-    IupSetAttribute(toggle, "SHOWBORDER", "NO");
+    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
     return toggle;
 }
 
@@ -51,11 +42,25 @@ void clumzySetAction(Ihandle *ih, Icallback cb) {
     IupSetCallback(ih, "FLAT_ACTION", cb);
 }
 
+void clumzyPinImageLabel(Ihandle *label, Ihandle *image, int pad) {
+    int w, h;
+    if (!label || !image) {
+        return;
+    }
+    IupSetAttribute(image, "AUTOSCALE", "NO");
+    w = IupGetInt(image, "WIDTH");
+    h = IupGetInt(image, "HEIGHT");
+    IupSetAttribute(label, "EXPAND", "NO");
+    IupSetfAttribute(label, "PADDING", "%dx%d", pad, pad);
+    IupSetfAttribute(label, "RASTERSIZE", "%dx%d", w + pad * 2, h + pad * 2);
+}
+
 void applyClumzyGlobals(void) {
     IupSetGlobal("DLGBGCOLOR", UI_BG);
     IupSetGlobal("DLGFGCOLOR", UI_TEXT);
     IupSetGlobal("TXTBGCOLOR", UI_INPUT_BG);
     IupSetGlobal("TXTFGCOLOR", UI_TEXT);
+    IupSetGlobal("IMAGEAUTOSCALE", "NO");
 }
 
 static void copyActionToFlat(Ihandle *ih) {
@@ -84,7 +89,6 @@ static void themeOne(Ihandle *ih) {
         strcmp(cls, "fill") == 0 ||
         strcmp(cls, "flatframe") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
-        IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
         if (strcmp(cls, "flatframe") == 0) {
             IupSetAttribute(ih, "TITLECOLOR", UI_TEXT);
             IupSetAttribute(ih, "TITLEBGCOLOR", UI_BG);
@@ -92,10 +96,18 @@ static void themeOne(Ihandle *ih) {
             IupSetAttribute(ih, "TITLELINECOLOR", UI_BORDER);
         }
     } else if (strcmp(cls, "label") == 0) {
+        if (IupGetAttribute(ih, "IMAGE")) {
+            IupSetAttribute(ih, "EXPAND", "NO");
+            IupSetAttribute(ih, "BGCOLOR", UI_BG);
+            return;
+        }
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
         IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
     } else if (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
+        IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
+    } else if (strcmp(cls, "toggle") == 0) {
+        IupSetAttribute(ih, "BGCOLOR", UI_BG);
         IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
     } else if (strcmp(cls, "flatbutton") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_SURFACE);
@@ -105,12 +117,6 @@ static void themeOne(Ihandle *ih) {
         IupSetAttribute(ih, "BORDERCOLOR", UI_BORDER);
         IupSetAttribute(ih, "BORDERHLCOLOR", UI_ACCENT);
         IupSetAttribute(ih, "BORDERPSCOLOR", UI_ACCENT);
-        copyActionToFlat(ih);
-    } else if (strcmp(cls, "flattoggle") == 0) {
-        IupSetAttribute(ih, "BGCOLOR", UI_BG);
-        IupSetAttribute(ih, "FGCOLOR", UI_TEXT);
-        IupSetAttribute(ih, "HLCOLOR", UI_BG);
-        IupSetAttribute(ih, "PSCOLOR", UI_BG);
         copyActionToFlat(ih);
     }
 }
