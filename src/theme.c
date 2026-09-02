@@ -1,5 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 #include "theme.h"
@@ -7,7 +5,6 @@
 #define CHECK_PX 14
 #define CLUMZY_LABEL "__CLUMZY_LABEL"
 #define CLUMZY_FG "__CLUMZY_FG"
-#define CLUMZY_LIST "CLUMZY_LIST"
 
 typedef HRESULT (WINAPI *SetWindowTheme_t)(HWND, LPCWSTR, LPCWSTR);
 typedef HRESULT (WINAPI *DwmSetWindowAttribute_t)(HWND, DWORD, LPCVOID, DWORD);
@@ -19,6 +16,7 @@ static DwmSetWindowAttribute_t pDwmSetWindowAttribute;
 static SetPreferredAppMode_t pSetPreferredAppMode;
 static AllowDarkModeForWindow_t pAllowDarkModeForWindow;
 static int darkApisLoaded;
+static HWND darkenedHwnd;
 
 static void loadDarkApis(void) {
     HMODULE ux;
@@ -166,7 +164,7 @@ static void styleLabelButton(Ihandle *label, int enabled) {
     IupSetAttribute(label, "ACTIVE", "YES");
 }
 
-/* CHECKSIZE=0 so IUP paints BGCOLOR. System checkbox skips the fill and stays white. */
+/* CHECKSIZE=0 so IUP paints BGCOLOR. The system checkbox skips that fill. */
 static void styleToggle(Ihandle *toggle, int enabled) {
     ensureCheckImages();
     IupSetAttribute(toggle, "CHECKSIZE", "0");
@@ -190,145 +188,6 @@ static void styleText(Ihandle *ih, int enabled) {
     IupSetAttribute(ih, "ACTIVE", "YES");
     IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
     IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-}
-
-static Ihandle *getDropList(Ihandle *drop) {
-    return drop ? (Ihandle*)IupGetAttribute(drop, CLUMZY_LIST) : NULL;
-}
-
-static Ihandle *getListDrop(Ihandle *list) {
-    return list ? (Ihandle*)IupGetAttribute(list, "CLUMZY_DROP") : NULL;
-}
-
-static void styleFlatList(Ihandle *list) {
-    IupSetAttribute(list, "BGCOLOR", UI_INPUT_BG);
-    IupSetAttribute(list, "FGCOLOR", UI_TEXT);
-    IupSetAttribute(list, "HLCOLOR", UI_HOVER);
-    IupSetAttribute(list, "PSCOLOR", UI_HOVER);
-    IupSetAttribute(list, "TEXTPSCOLOR", UI_TEXT);
-    IupSetAttribute(list, "BORDERCOLOR", UI_SAGE);
-    IupSetAttribute(list, "BORDERWIDTH", "1");
-    IupSetAttribute(list, "ALIGNMENT", "ALEFT:ACENTER");
-}
-
-static void styleDropButton(Ihandle *drop) {
-    IupSetAttribute(drop, "BGCOLOR", UI_SURFACE);
-    IupSetAttribute(drop, "FGCOLOR", UI_TEXT);
-    IupSetAttribute(drop, "HLCOLOR", UI_HOVER);
-    IupSetAttribute(drop, "PSCOLOR", UI_PRESS);
-    IupSetAttribute(drop, "TEXTHLCOLOR", UI_TEXT);
-    IupSetAttribute(drop, "TEXTPSCOLOR", UI_TEXT);
-    IupSetAttribute(drop, "BORDERCOLOR", UI_SAGE);
-    IupSetAttribute(drop, "BORDERHLCOLOR", UI_ACCENT);
-    IupSetAttribute(drop, "BORDERPSCOLOR", UI_ACCENT);
-    IupSetAttribute(drop, "BORDERWIDTH", "1");
-    IupSetAttribute(drop, "SHOWBORDER", "YES");
-    IupSetAttribute(drop, "DROPONARROW", "NO");
-    IupSetAttribute(drop, "ARROWCOLOR", UI_SAGE);
-    IupSetAttribute(drop, "ALIGNMENT", "ALEFT:ACENTER");
-    IupSetAttribute(drop, "PADDING", "6x4");
-    {
-        const char *cols = IupGetAttribute(drop, "VISIBLECOLUMNS");
-        if (cols && cols[0]) {
-            IupSetfAttribute(drop, "SIZE", "%sx", cols);
-        }
-    }
-}
-
-static void syncDropList(Ihandle *drop) {
-    Ihandle *list = getDropList(drop);
-    const char *val;
-    const char *title;
-    char key[8];
-    int i;
-    int count = 0;
-    int value;
-
-    if (!drop || !list) {
-        return;
-    }
-    styleDropButton(drop);
-    styleFlatList(list);
-
-    if (IupGetAttribute(drop, "1")) {
-        for (i = 1; i <= 128; ++i) {
-            sprintf(key, "%d", i);
-            val = IupGetAttribute(drop, key);
-            if (!val) {
-                IupSetAttribute(list, key, NULL);
-                break;
-            }
-            IupSetStrAttribute(list, key, val);
-            count = i;
-        }
-    } else {
-        count = IupGetInt(list, "COUNT");
-    }
-
-    val = IupGetAttribute(drop, "VISIBLECOLUMNS");
-    if (val) {
-        IupSetAttribute(list, "VISIBLECOLUMNS", val);
-    }
-    IupSetInt(list, "VISIBLELINES", count > 12 ? 12 : (count < 1 ? 1 : count));
-
-    val = IupGetAttribute(drop, "VALUE");
-    if (val && val[0] && strcmp(val, "0") != 0) {
-        IupSetAttribute(list, "VALUE", val);
-        value = atoi(val);
-        if (value > 0) {
-            sprintf(key, "%d", value);
-            title = IupGetAttribute(list, key);
-            if (!title) {
-                title = IupGetAttribute(drop, key);
-            }
-            IupSetStrAttribute(drop, "TITLE", title ? title : "");
-        }
-    } else {
-        IupSetAttribute(list, "VALUE", NULL);
-        IupSetAttribute(drop, "TITLE", "");
-    }
-}
-
-static int listPickCb(Ihandle *list, char *text, int item, int state) {
-    Ihandle *drop;
-    Icallback cb;
-
-    if (state != 1) {
-        return IUP_DEFAULT;
-    }
-    drop = IupGetAttributeHandle(IupGetDialog(list), "DROPBUTTON");
-    if (!drop) {
-        drop = getListDrop(list);
-    }
-    if (drop) {
-        IupSetAttribute(drop, "SHOWDROPDOWN", "NO");
-        IupSetStrAttribute(drop, "TITLE", text);
-        IupSetInt(drop, "VALUE", item);
-        cb = IupGetCallback(drop, "ACTION");
-        if (cb) {
-            return ((int (*)(Ihandle *, char *, int, int))cb)(drop, text, item, state);
-        }
-    }
-    return IUP_DEFAULT;
-}
-
-static int dropDownCb(Ihandle *drop, int state) {
-    Ihandle *list;
-    Ihandle *dlg;
-
-    if (state != 1) {
-        return IUP_DEFAULT;
-    }
-    syncDropList(drop);
-    list = getDropList(drop);
-    if (list) {
-        dlg = IupGetDialog(list);
-        if (dlg) {
-            IupSetAttribute(dlg, "BGCOLOR", UI_SURFACE);
-            IupSetAttribute(dlg, "BACKGROUND", UI_SURFACE);
-        }
-    }
-    return IUP_DEFAULT;
 }
 
 static int toggleFlatAction(Ihandle *ih, int state) {
@@ -381,16 +240,9 @@ Ihandle *clumzyLabel(const char *title) {
 }
 
 Ihandle *clumzyList(void) {
-    Ihandle *list = IupFlatList();
-    Ihandle *drop = IupDropButton(list);
-    IupSetAttribute(drop, CLUMZY_LIST, (char*)list);
-    IupSetAttribute(list, "CLUMZY_DROP", (char*)drop);
-    IupSetAttribute(list, "EXPAND", "YES");
-    IupSetCallback(list, "FLAT_ACTION", (Icallback)listPickCb);
-    IupSetCallback(drop, "DROPDOWN_CB", (Icallback)dropDownCb);
-    styleFlatList(list);
-    styleDropButton(drop);
-    return drop;
+    Ihandle *list = IupList(NULL);
+    styleText(list, 1);
+    return list;
 }
 
 void clumzySetAction(Ihandle *ih, Icallback cb) {
@@ -429,16 +281,15 @@ void clumzyApplyWindowDarkMode(void *hwnd) {
     BOOL dark = TRUE;
 
     preferWinDarkMode();
-    if (!hwnd) {
+    if (!hwnd || (HWND)hwnd == darkenedHwnd) {
         return;
     }
+    darkenedHwnd = (HWND)hwnd;
     allowDark((HWND)hwnd);
     if (pDwmSetWindowAttribute) {
         pDwmSetWindowAttribute((HWND)hwnd, 20, &dark, sizeof(dark));
         pDwmSetWindowAttribute((HWND)hwnd, 19, &dark, sizeof(dark));
     }
-    SetWindowPos((HWND)hwnd, NULL, 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
 
 static int ancestorEnabled(Ihandle *ih) {
@@ -451,73 +302,55 @@ static int ancestorEnabled(Ihandle *ih) {
     return 1;
 }
 
-static void skinNativeControl(Ihandle *ih) {
-    const char *cls = IupGetClassName(ih);
+/* After map: dark title bar + untheme native edits/combos only. Do not
+ * change SIZE or walk every HWND — that retriggered MAP/SHOW and hung. */
+static void skinAfterMap(Ihandle *ih) {
+    const char *cls;
     HWND hwnd;
-    int enabled;
+    Ihandle *child;
 
-    if (!ih || !cls) {
+    if (!ih) {
         return;
     }
+    cls = IupGetClassName(ih);
     hwnd = (HWND)IupGetAttribute(ih, "HWND");
-    enabled = ancestorEnabled(ih);
 
-    /* Only untheme native edits/combos. Labels and checkboxes stay IUP-drawn. */
-    if (hwnd && (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0)) {
-        skinHwndTree(hwnd);
-        styleText(ih, enabled);
-        InvalidateRect(hwnd, NULL, TRUE);
-        return;
-    }
-    if (strcmp(cls, "dialog") == 0) {
+    if (cls && strcmp(cls, "dialog") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
         IupSetAttribute(ih, "BACKGROUND", UI_BG);
         if (hwnd) {
             clumzyApplyWindowDarkMode(hwnd);
         }
-    } else if (strcmp(cls, "flatframe") == 0) {
-        styleFrame(ih);
-    } else if (strcmp(cls, "flattoggle") == 0) {
-        styleToggle(ih, enabled);
-        copyToggleAction(ih);
-    } else if (strcmp(cls, "flatbutton") == 0) {
-        if (isLabelButton(ih)) {
-            styleLabelButton(ih, enabled);
-        } else {
-            styleButton(ih);
-        }
-    } else if (strcmp(cls, "dropbutton") == 0) {
-        syncDropList(ih);
-    } else if (strcmp(cls, "flatlist") == 0) {
-        styleFlatList(ih);
-    } else if (strcmp(cls, "label") == 0) {
-        IupSetAttribute(ih, "BGCOLOR", UI_BG);
+    } else if (cls && hwnd && (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0)) {
+        skinHwndTree(hwnd);
+        styleText(ih, ancestorEnabled(ih));
+        InvalidateRect(hwnd, NULL, TRUE);
     }
-}
 
-static void skinWalk(Ihandle *ih) {
-    Ihandle *child;
-    if (!ih) {
-        return;
-    }
-    skinNativeControl(ih);
     child = IupGetNextChild(ih, NULL);
     while (child) {
-        skinWalk(child);
+        skinAfterMap(child);
         child = IupGetBrother(child);
     }
 }
 
 void clumzyOnMapped(Ihandle *ih) {
-    skinWalk(ih);
+    if (!ih || IupGetInt(ih, "__CLUMZY_SKINNING")) {
+        return;
+    }
+    IupSetInt(ih, "__CLUMZY_SKINNING", 1);
+    skinAfterMap(ih);
+    IupSetInt(ih, "__CLUMZY_SKINNING", 0);
 }
 
 void clumzySyncToggleImages(Ihandle *root) {
     Ihandle *child;
+    const char *cls;
     if (!root) {
         return;
     }
-    if (IupGetClassName(root) && strcmp(IupGetClassName(root), "flattoggle") == 0) {
+    cls = IupGetClassName(root);
+    if (cls && strcmp(cls, "flattoggle") == 0) {
         syncToggleImage(root);
     }
     child = IupGetNextChild(root, NULL);
@@ -528,32 +361,19 @@ void clumzySyncToggleImages(Ihandle *root) {
 }
 
 void clumzySyncList(Ihandle *ih) {
-    if (ih && IupGetClassName(ih) && strcmp(IupGetClassName(ih), "dropbutton") == 0) {
-        syncDropList(ih);
+    (void)ih;
+}
+
+void clumzyStoreListItem(Ihandle *ih, const char *id, const char *text) {
+    if (ih) {
+        IupStoreAttribute(ih, id, text);
     }
 }
 
-void clumzyStoreListItem(Ihandle *drop, const char *id, const char *text) {
-    Ihandle *list = getDropList(drop);
-    if (!drop) {
-        return;
+void clumzySetListAttributes(Ihandle *ih, const char *attrs) {
+    if (ih && attrs) {
+        IupSetAttributes(ih, attrs);
     }
-    IupStoreAttribute(drop, id, text);
-    if (list) {
-        IupStoreAttribute(list, id, text);
-    }
-}
-
-void clumzySetListAttributes(Ihandle *drop, const char *attrs) {
-    Ihandle *list = getDropList(drop);
-    if (!drop) {
-        return;
-    }
-    IupSetAttributes(drop, attrs);
-    if (list) {
-        IupSetAttributes(list, attrs);
-    }
-    syncDropList(drop);
 }
 
 static void themeOne(Ihandle *ih) {
@@ -598,10 +418,6 @@ static void themeOne(Ihandle *ih) {
             styleButton(ih);
             copyActionToFlat(ih);
         }
-    } else if (strcmp(cls, "dropbutton") == 0) {
-        syncDropList(ih);
-    } else if (strcmp(cls, "flatlist") == 0) {
-        styleFlatList(ih);
     }
 }
 
@@ -653,9 +469,6 @@ static void enableOne(Ihandle *ih, int enabled) {
             IupSetAttribute(ih, "ACTIVE", "YES");
             IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
         }
-    } else if (strcmp(cls, "dropbutton") == 0) {
-        styleDropButton(ih);
-        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
     }
 }
 
@@ -717,7 +530,8 @@ void clumzyLockText(Ihandle *ih, int locked) {
     }
     hwnd = (HWND)IupGetAttribute(ih, "HWND");
     if (hwnd) {
-        skinHwndTree(hwnd);
+        stripVisualStyles(hwnd);
+        allowDark(hwnd);
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
