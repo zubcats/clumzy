@@ -1481,7 +1481,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
 
         // Successfully started
         showStatus("Started filtering. Enable functionalities to take effect.");
-        IupSetAttribute(filterText, "ACTIVE", "NO");
+        clumzyLockText(filterText, 1);
         IupSetAttribute(filterButton, "TITLE", "Stop");
         clumzySetAction(filterButton, (Icallback)uiStopCb);
         IupSetAttribute(timer, "RUN", "NO");
@@ -1498,7 +1498,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
 
         // Successfully started
         showStatus("Started filtering. Enable functionalities to take effect.");
-        IupSetAttribute(filterText, "ACTIVE", "NO");
+        clumzyLockText(filterText, 1);
         IupSetAttribute(filterButton, "TITLE", "Stop");
         clumzySetAction(filterButton, (Icallback)uiStopCb);
         IupSetAttribute(timer, "RUN", "YES");
@@ -1523,7 +1523,7 @@ static int uiStopCb(Ihandle *ih) {
     IupFlush(); // flush to show disabled state
     divertStop();
 
-    IupSetAttribute(filterText, "ACTIVE", "YES");
+    clumzyLockText(filterText, 0);
     IupSetAttribute(filterButton, "TITLE", "Start");
     IupSetAttribute(filterButton, "ACTIVE", "YES");
     clumzySetAction(filterButton, (Icallback)uiStartCb);
@@ -1544,12 +1544,12 @@ static int uiStopCb(Ihandle *ih) {
 static int uiToggleControls(Ihandle *ih, int state) {
     Ihandle *controls = (Ihandle*)IupGetAttribute(ih, CONTROLS_HANDLE);
     short *target = (short*)IupGetAttribute(ih, SYNCED_VALUE);
-    int controlsActive = IupGetInt(controls, "ACTIVE");
+    int controlsActive = clumzyGetControlsEnabled(controls);
     if (controlsActive && !state) {
-        IupSetAttribute(controls, "ACTIVE", "NO");
+        clumzySetControlsEnabled(controls, 0);
         InterlockedExchange16(target, I2S(state));
     } else if (!controlsActive && state) {
-        IupSetAttribute(controls, "ACTIVE", "YES");
+        clumzySetControlsEnabled(controls, 1);
         InterlockedExchange16(target, I2S(state));
     }
 
@@ -2415,7 +2415,7 @@ static void uiSetupModule(Module *module, Ihandle *parent) {
     IupSetCallback(toggle, "ACTION", (Icallback)uiToggleControls);
     IupSetAttribute(toggle, CONTROLS_HANDLE, (char*)controls);
     IupSetAttribute(toggle, SYNCED_VALUE, (char*)module->enabledFlag);
-    IupSetAttribute(controls, "ACTIVE", "NO"); // startup as inactive
+    clumzySetControlsEnabled(controls, 0);
     IupSetAttribute(controls, "NCGAP", "4"); // startup as inactive
 
     // set default icon

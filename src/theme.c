@@ -121,6 +121,66 @@ static void themeOne(Ihandle *ih) {
     }
 }
 
+static void enableOne(Ihandle *ih, int enabled) {
+    const char *cls = IupGetClassName(ih);
+    if (!cls) {
+        return;
+    }
+    if (strcmp(cls, "text") == 0) {
+        IupSetAttribute(ih, "READONLY", enabled ? "NO" : "YES");
+        IupSetAttribute(ih, "ACTIVE", "YES");
+        IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    } else if (strcmp(cls, "toggle") == 0) {
+        IupSetAttribute(ih, "ACTIVE", enabled ? "YES" : "NO");
+        IupSetAttribute(ih, "BGCOLOR", UI_BG);
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    } else if (strcmp(cls, "flatbutton") == 0) {
+        IupSetAttribute(ih, "ACTIVE", enabled ? "YES" : "NO");
+        IupSetAttribute(ih, "BGCOLOR", UI_SURFACE);
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+        IupSetAttribute(ih, "HLCOLOR", UI_HOVER);
+        IupSetAttribute(ih, "PSCOLOR", UI_PRESS);
+        IupSetAttribute(ih, "BORDERCOLOR", UI_BORDER);
+    } else if (strcmp(cls, "label") == 0 && !IupGetAttribute(ih, "IMAGE")) {
+        IupSetAttribute(ih, "ACTIVE", "YES");
+        IupSetAttribute(ih, "BGCOLOR", UI_BG);
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    }
+}
+
+static void enableWalk(Ihandle *ih, int enabled) {
+    Ihandle *child;
+    enableOne(ih, enabled);
+    child = IupGetNextChild(ih, NULL);
+    while (child) {
+        enableWalk(child, enabled);
+        child = IupGetBrother(child);
+    }
+}
+
+void clumzySetControlsEnabled(Ihandle *root, int enabled) {
+    if (!root) {
+        return;
+    }
+    IupSetInt(root, "CLUMZY_ENABLED", enabled);
+    enableWalk(root, enabled);
+}
+
+int clumzyGetControlsEnabled(Ihandle *root) {
+    return root ? IupGetInt(root, "CLUMZY_ENABLED") : 0;
+}
+
+void clumzyLockText(Ihandle *ih, int locked) {
+    if (!ih) {
+        return;
+    }
+    IupSetAttribute(ih, "READONLY", locked ? "YES" : "NO");
+    IupSetAttribute(ih, "ACTIVE", "YES");
+    IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
+    IupSetAttribute(ih, "FGCOLOR", locked ? UI_TEXT_MUTE : UI_TEXT);
+}
+
 void applyClumzyTheme(Ihandle *root) {
     Ihandle *child;
 

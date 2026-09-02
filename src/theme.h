@@ -23,3 +23,6 @@ void clumzySetAction(Ihandle *ih, Icallback cb);
 void clumzyPinImageLabel(Ihandle *label, Ihandle *image, int pad);
 void applyClumzyGlobals(void);
 void applyClumzyTheme(Ihandle *root);
+void clumzySetControlsEnabled(Ihandle *root, int enabled);
+int clumzyGetControlsEnabled(Ihandle *root);
+void clumzyLockText(Ihandle *ih, int locked);
