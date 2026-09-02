@@ -1029,6 +1029,7 @@ static Ihandle *timeout = NULL;
 
 void showStatus(const char *line);
 static int uiOnDialogShow(Ihandle *ih, int state);
+static int uiOnDialogMap(Ihandle *ih);
 static int uiStopCb(Ihandle *ih);
 static int uiStartCb(Ihandle *ih);
 static int uiTimerCb(Ihandle *ih);
@@ -1136,6 +1137,7 @@ void init(int argc, char* argv[]) {
     loadConfig();
 
     // iup inits
+    clumzyInitDarkMode();
     IupOpen(&argc, &argv);
     applyClumzyGlobals();
 
@@ -1342,6 +1344,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialog, "RESIZE", "NO");
     IupSetHandle("clumzy_appicon", createClumzyAppIconImage());
     IupSetAttribute(dialog, "ICON", "clumzy_appicon");
+    IupSetCallback(dialog, "MAP_CB", (Icallback)uiOnDialogMap);
     IupSetCallback(dialog, "SHOW_CB", (Icallback)uiOnDialogShow);
 
 
@@ -1429,6 +1432,11 @@ static BOOL checkIsRunning() {
 }
 
 
+static int uiOnDialogMap(Ihandle *ih) {
+    clumzyOnMapped(ih);
+    return IUP_DEFAULT;
+}
+
 static int uiOnDialogShow(Ihandle *ih, int state) {
     // only need to process on show
     HWND hWnd;
@@ -1446,7 +1454,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     icon = (HICON)LoadImage(hInstance, "CLUMZY_ICON", IMAGE_ICON,
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
-    clumzyApplyWindowDarkMode(hWnd);
+    clumzyOnMapped(ih);
 
     exit = checkIsRunning();
     if (exit) {
