@@ -7,7 +7,7 @@ import os
 import sys
 from ctypes import c_char_p, c_float, c_int
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QIcon, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -21,7 +21,6 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -96,9 +95,6 @@ QGroupBox::title {{
     left: 8px;
     padding: 0 4px;
     color: {UI_SAGE};
-}}
-QGroupBox QWidget {{
-    background-color: transparent;
 }}
 QLabel {{
     color: {UI_SAGE};
@@ -349,6 +345,21 @@ class Engine:
         self.dll.clumzy_enable(name.encode('ascii'), 1 if on else 0)
 
 
+class EngineCallThread(QThread):
+    finished_ok = pyqtSignal(str)
+
+    def __init__(self, fn) -> None:
+        super().__init__()
+        self._fn = fn
+
+    def run(self) -> None:
+        try:
+            result = self._fn()
+            self.finished_ok.emit(result if isinstance(result, str) else '')
+        except Exception as exc:
+            self.finished_ok.emit(str(exc))
+
+
 class ModuleRow(QWidget):
     def __init__(self, title: str, extra: QWidget) -> None:
         super().__init__()
@@ -396,6 +407,9 @@ class ClumzyWindow(QMainWindow):
         self.presets = presets
         self.running = False
         self._key_down = False
+        self._hotkey_armed = False
+        self._engine_busy = False
+        self._worker = None
         self.setWindowTitle('Clumzy 2.0')
         self.setObjectName('clumzyMain')
         icon_path = resource_path('clumzy-icon.ico')
@@ -485,19 +499,24 @@ class ClumzyWindow(QMainWindow):
         self.auto_stop = QTimer(self)
         self.auto_stop.setSingleShot(True)
         self.auto_stop.timeout.connect(self.stop_filter)
+        self._sync = QTimer(self)
+        self._sync.setSingleShot(True)
+        self._sync.setInterval(80)
+        self._sync.timeout.connect(self.push_engine)
         self.key_timer = QTimer(self)
         self.key_timer.timeout.connect(self._poll_key)
-        self.key_timer.start(15)
+        self.key_timer.start(30)
+        QTimer.singleShot(1000, self._arm_hotkey)
 
-        for widget in self.findChildren((QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit)):
-            if isinstance(widget, QCheckBox):
-                widget.toggled.connect(self.push_engine)
-            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                widget.valueChanged.connect(self.push_engine)
-            elif isinstance(widget, QComboBox) and widget is not self.filter_presets \
-                    and widget is not self.func_presets and widget is not self.trigger:
-                widget.currentIndexChanged.connect(self.push_engine)
-        self.push_engine()
+        skip = {self.filter_edit, self.filter_presets, self.func_presets, self.trigger}
+        for widget in self.findChildren(QCheckBox):
+            widget.toggled.connect(self.schedule_push)
+        for widget in self.findChildren(QSpinBox) + self.findChildren(QDoubleSpinBox):
+            widget.valueChanged.connect(self.schedule_push)
+        for widget in self.findChildren(QComboBox):
+            if widget not in skip:
+                widget.currentIndexChanged.connect(self.schedule_push)
+        self.schedule_push()
 
     def _load_logo(self) -> None:
         path = resource_path('clumzy-logo.png')
@@ -698,10 +717,18 @@ class ClumzyWindow(QMainWindow):
         self.rst_in.setChecked(parse_truth(preset.get('SetTCPRST_Inbound', 'false')))
         self.rst_out.setChecked(parse_truth(preset.get('SetTCPRST_Outbound', 'false')))
         self.rst_chance.setValue(float(preset.get('SetTCPRST_Chance', '0') or 0))
-        self.push_engine()
+        self.schedule_push()
+
+    def schedule_push(self) -> None:
+        self._sync.start()
+
+    def _arm_hotkey(self) -> None:
+        self._hotkey_armed = True
 
     def push_engine(self) -> None:
         e = self.engine
+        if e is None:
+            return
         e.dll.clumzy_set_network(int(self.network.currentData() or 2))
         e.enable('lag', self.lag_row.enabled.isChecked())
         e.dll.clumzy_lag(int(self.lag_in.isChecked()), int(self.lag_out.isChecked()), int(self.lag_ms.value()))
@@ -739,8 +766,23 @@ class ClumzyWindow(QMainWindow):
             self.start_filter()
 
     def start_filter(self) -> None:
+        if self._engine_busy:
+            return
         self.push_engine()
-        error = self.engine.start(self.filter_edit.text().strip() or 'true')
+        filt = self.filter_edit.text().strip() or 'true'
+        self._engine_busy = True
+        self.start_btn.setEnabled(False)
+        self.status.setText('Starting filter…')
+        self._worker = EngineCallThread(lambda: self.engine.start(filt) or '')
+        self._worker.finished_ok.connect(self._on_started)
+        self._worker.start()
+
+    def _on_started(self, error: str) -> None:
+        self._engine_busy = False
+        self.start_btn.setEnabled(True)
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
         if error:
             self.status.setText(error)
             return
@@ -753,15 +795,32 @@ class ClumzyWindow(QMainWindow):
 
     def stop_filter(self) -> None:
         self.auto_stop.stop()
-        if self.running:
-            self.engine.stop()
+        if self._engine_busy:
+            return
+        if not self.running:
+            self.start_btn.setText('Start')
+            self.filter_edit.setEnabled(True)
+            return
+        self._engine_busy = True
+        self.start_btn.setEnabled(False)
+        self.status.setText('Stopping…')
+        self._worker = EngineCallThread(lambda: self.engine.stop() or '')
+        self._worker.finished_ok.connect(self._on_stopped)
+        self._worker.start()
+
+    def _on_stopped(self, _unused: str = '') -> None:
+        self._engine_busy = False
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
         self.running = False
         self.start_btn.setText('Start')
+        self.start_btn.setEnabled(True)
         self.filter_edit.setEnabled(True)
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
     def _poll_key(self) -> None:
-        if not self.keybind:
+        if not self._hotkey_armed or not self.keybind or self._engine_busy:
             return
         scan = ctypes.windll.user32.VkKeyScanW(ord(self.keybind[0]))
         if scan == -1:
@@ -774,7 +833,12 @@ class ClumzyWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.key_timer.stop()
-        self.stop_filter()
+        self._hotkey_armed = False
+        if self.running:
+            try:
+                self.engine.stop()
+            except Exception:
+                pass
         event.accept()
 
 
@@ -791,7 +855,6 @@ def main() -> int:
     app.setApplicationName('Clumzy')
     app.setStyle('Fusion')
     apply_fusion_palette(app)
-    app.setStyleSheet(zubcut_qss())
     font = QFont('Segoe UI', 9)
     app.setFont(font)
 
@@ -814,6 +877,7 @@ def main() -> int:
     filters = parse_config_filters(os.path.join(app_dir(), 'config.txt'))
     keybind, presets = parse_presets(os.path.join(app_dir(), 'presets.ini'))
     window = ClumzyWindow(engine, filters, keybind, presets)
+    window.setStyleSheet(zubcut_qss())
     window.resize(860, 760)
     window.show()
     apply_dark_titlebar(int(window.winId()))
