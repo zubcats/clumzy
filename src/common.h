@@ -2,7 +2,12 @@
 #include <stdio.h>
 #include <assert.h>
 #include "iup.h"
+#include "theme.h"
 #include "windivert.h"
+
+#define IupFrame(child) clumzyFrame(child)
+#define IupButton(title, action) clumzyButton(title)
+#define IupToggle(title, action) clumzyToggle(title)
 
 #define APP_NAME "Clumzy"
 #define CLUMSY_VERSION "2.0"

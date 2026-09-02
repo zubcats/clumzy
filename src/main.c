@@ -1137,6 +1137,7 @@ void init(int argc, char* argv[]) {
 
     // iup inits
     IupOpen(&argc, &argv);
+    applyClumzyGlobals();
 
     // this is so easy to get wrong so it's pretty worth noting in the program
     statusLabel = IupLabel("NOTICE: When capturing localhost (loopback) packets, you CAN'T include inbound criteria.\n"
@@ -1235,7 +1236,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(filterText, "EXPAND", "HORIZONTAL");
     IupSetCallback(filterText, "VALUECHANGED_CB", (Icallback)uiFilterTextCb);
     IupSetAttribute(filterButton, "PADDING", "8x");
-    IupSetCallback(filterButton, "ACTION", uiStartCb);
+    clumzySetAction(filterButton, (Icallback)uiStartCb);
     IupSetAttribute(topVbox, "NCMARGIN", "4x4");
     IupSetAttribute(topVbox, "NCGAP", "4x2");
     IupSetAttribute(controlHbox, "ALIGNMENT", "ACENTER");
@@ -1283,11 +1284,11 @@ void init(int argc, char* argv[]) {
     doingIcon = IupImage(8, 8, icon8x8);
     errorIcon = IupImage(8, 8, icon8x8);
     IupSetAttribute(noneIcon, "0", "BGCOLOR");
-    IupSetAttribute(noneIcon, "1", "224 224 224");
+    IupSetAttribute(noneIcon, "1", UI_TEXT_MUTE);
     IupSetAttribute(doingIcon, "0", "BGCOLOR");
-    IupSetAttribute(doingIcon, "1", "109 170 44");
+    IupSetAttribute(doingIcon, "1", UI_ACCENT);
     IupSetAttribute(errorIcon, "0", "BGCOLOR");
-    IupSetAttribute(errorIcon, "1", "208 70 72");
+    IupSetAttribute(errorIcon, "1", UI_ERROR);
     IupSetHandle("none_icon", noneIcon);
     IupSetHandle("doing_icon", doingIcon);
     IupSetHandle("error_icon", errorIcon);
@@ -1346,6 +1347,8 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialogVBox, "ALIGNMENT", "ACENTER");
     IupSetAttribute(dialogVBox, "NCMARGIN", "4x4");
     IupSetAttribute(dialogVBox, "NCGAP", "4x2");
+    applyClumzyTheme(dialog);
+    IupSetAttribute(statusLabel, "FGCOLOR", UI_TEXT_MUTE);
 
     // setup timer
     timer = IupTimer();
@@ -1478,7 +1481,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
         showStatus("Started filtering. Enable functionalities to take effect.");
         IupSetAttribute(filterText, "ACTIVE", "NO");
         IupSetAttribute(filterButton, "TITLE", "Stop");
-        IupSetCallback(filterButton, "ACTION", uiStopCb);
+        clumzySetAction(filterButton, (Icallback)uiStopCb);
         IupSetAttribute(timer, "RUN", "NO");
         return IUP_DEFAULT;
     }
@@ -1495,7 +1498,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
         showStatus("Started filtering. Enable functionalities to take effect.");
         IupSetAttribute(filterText, "ACTIVE", "NO");
         IupSetAttribute(filterButton, "TITLE", "Stop");
-        IupSetCallback(filterButton, "ACTION", uiStopCb);
+        clumzySetAction(filterButton, (Icallback)uiStopCb);
         IupSetAttribute(timer, "RUN", "YES");
 
         // Create and configure the timer
@@ -1521,7 +1524,7 @@ static int uiStopCb(Ihandle *ih) {
     IupSetAttribute(filterText, "ACTIVE", "YES");
     IupSetAttribute(filterButton, "TITLE", "Start");
     IupSetAttribute(filterButton, "ACTIVE", "YES");
-    IupSetCallback(filterButton, "ACTION", uiStartCb);
+    clumzySetAction(filterButton, (Icallback)uiStartCb);
 
     // stop timer and clean up icons
     IupSetAttribute(timer, "RUN", "NO");

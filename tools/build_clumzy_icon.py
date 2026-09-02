@@ -1,7 +1,8 @@
 """Build etc/clumzy-icon.ico plus the in-app logo C arrays.
 
-Use the original square PNG as-is. The only transform is a uniform scale
-so each frame fits its target size.
+Use the original logo as-is. The only transform is a uniform scale so it fits
+the target. Window icons are square (Windows requirement) so the wide mark is
+letterboxed. The in-app logo keeps the source aspect ratio.
 """
 from __future__ import annotations
 
@@ -11,14 +12,16 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "etc" / "zub-logo.png"
+SRC = ROOT / "etc" / "clumzy-logo.png"
 OUT = ROOT / "etc" / "clumzy-icon.ico"
 PREVIEW_DIR = ROOT / "dist"
 
 # Title bar / taskbar first. 256 last for Explorer.
 SIZES = (16, 20, 24, 32, 48, 64, 256)
-LOGO_SIZE = 48
+LOGO_H = 40
 APPICON_SIZE = 32
+# ZubCut window chrome — white mark stays visible on light Explorer / title bars.
+ICON_FILL = (0x14, 0x14, 0x14, 255)
 
 
 def _load_png_rgba(path: Path) -> tuple[int, int, bytes]:
@@ -121,35 +124,49 @@ def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int,
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy)
 
 
-def _scale_to_fit(w: int, h: int, rgba: bytes, size: int) -> bytes:
-    """Uniform scale of the original image into a size x size square."""
+def _scale_to_fit(
+    w: int,
+    h: int,
+    rgba: bytes,
+    dw: int,
+    dh: int,
+    fill: tuple[int, int, int, int] = (0, 0, 0, 0),
+) -> bytes:
+    """Uniform scale of the original image into dw x dh. No stretch, no crop."""
     try:
         from PIL import Image
 
         src = Image.frombytes("RGBA", (w, h), rgba)
-        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        scale = min(size / w, size / h)
+        canvas = Image.new("RGBA", (dw, dh), fill)
+        scale = min(dw / w, dh / h)
         nw = max(1, int(round(w * scale)))
         nh = max(1, int(round(h * scale)))
         resized = src.resize((nw, nh), Image.Resampling.LANCZOS)
-        canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2), resized)
-        return resized.tobytes() if nw == size and nh == size else canvas.tobytes()
+        canvas.paste(resized, ((dw - nw) // 2, (dh - nh) // 2), resized)
+        return canvas.tobytes()
     except ImportError:
         pass
 
-    scale = min(size / float(w), size / float(h))
+    scale = min(dw / float(w), dh / float(h))
     nw = max(1, int(round(w * scale)))
     nh = max(1, int(round(h * scale)))
-    ox = (size - nw) / 2.0
-    oy = (size - nh) / 2.0
-    out = bytearray(size * size * 4)
-    for y in range(size):
-        sy = (y - oy + 0.5) * (h / float(nh)) - 0.5
-        for x in range(size):
+    ox = (dw - nw) / 2.0
+    oy = (dh - nh) / 2.0
+    out = bytearray(dw * dh * 4)
+    for y in range(dh):
+        for x in range(dw):
+            i = (y * dw + x) * 4
+            out[i : i + 4] = bytes(fill)
             sx = (x - ox + 0.5) * (w / float(nw)) - 0.5
+            sy = (y - oy + 0.5) * (h / float(nh)) - 0.5
             r, g, b, a = _sample(rgba, w, h, sx, sy)
-            i = (y * size + x) * 4
-            out[i : i + 4] = bytes((r, g, b, a))
+            if a == 0:
+                continue
+            ia = a / 255.0
+            out[i] = int(r * ia + fill[0] * (1.0 - ia))
+            out[i + 1] = int(g * ia + fill[1] * (1.0 - ia))
+            out[i + 2] = int(b * ia + fill[2] * (1.0 - ia))
+            out[i + 3] = min(255, fill[3] + a)
     return bytes(out)
 
 
@@ -209,21 +226,22 @@ def _write_c_rgba(
     macro_h: str,
     array_name: str,
     fn_name: str,
-    size: int,
+    width: int,
+    height: int,
     rgba: bytes,
 ) -> None:
     lines = [
         '#include "iup.h"',
         "",
-        f"#define {macro_w} {size}",
-        f"#define {macro_h} {size}",
+        f"#define {macro_w} {width}",
+        f"#define {macro_h} {height}",
         "",
         f"static const unsigned char {array_name}[{macro_w} * {macro_h} * 4] = {{",
     ]
-    for y in range(size):
+    for y in range(height):
         row = ", ".join(
-            f"0x{rgba[(y * size + x) * 4 + c]:02X}"
-            for x in range(size)
+            f"0x{rgba[(y * width + x) * 4 + c]:02X}"
+            for x in range(width)
             for c in range(4)
         )
         lines.append(f"    {row},")
@@ -240,34 +258,33 @@ def _write_c_rgba(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _on_checker(rgba: bytes, size: int) -> bytes:
-    out = bytearray(size * size * 4)
-    for y in range(size):
-        for x in range(size):
-            i = (y * size + x) * 4
+def _composite(rgba: bytes, width: int, height: int, bg: tuple[int, int, int]) -> bytes:
+    out = bytearray(width * height * 4)
+    for y in range(height):
+        for x in range(width):
+            i = (y * width + x) * 4
             r, g, b, a = rgba[i : i + 4]
-            cell = 200 if ((x // 4) + (y // 4)) % 2 == 0 else 120
             ia = a / 255.0
-            out[i] = int(r * ia + cell * (1.0 - ia))
-            out[i + 1] = int(g * ia + cell * (1.0 - ia))
-            out[i + 2] = int(b * ia + cell * (1.0 - ia))
+            out[i] = int(r * ia + bg[0] * (1.0 - ia))
+            out[i + 1] = int(g * ia + bg[1] * (1.0 - ia))
+            out[i + 2] = int(b * ia + bg[2] * (1.0 - ia))
             out[i + 3] = 255
     return bytes(out)
 
 
-def _write_preview_png(path: Path, size: int, rgba: bytes) -> None:
+def _write_preview_png(path: Path, width: int, height: int, rgba: bytes) -> None:
     try:
         from PIL import Image
 
-        Image.frombytes("RGBA", (size, size), rgba).save(path)
+        Image.frombytes("RGBA", (width, height), rgba).save(path)
         return
     except ImportError:
         pass
     raw = bytearray()
-    for y in range(size):
+    for y in range(height):
         raw.append(0)
-        raw.extend(rgba[y * size * 4 : (y + 1) * size * 4])
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+        raw.extend(rgba[y * width * 4 : (y + 1) * width * 4])
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
@@ -290,7 +307,7 @@ def main() -> int:
         print(f"missing {SRC}", file=sys.stderr)
         return 1
     w, h, rgba = _load_png_rgba(SRC)
-    frames = [(s, _scale_to_fit(w, h, rgba, s)) for s in SIZES]
+    frames = [(s, _scale_to_fit(w, h, rgba, s, s, ICON_FILL)) for s in SIZES]
     _write_ico(OUT, frames)
     app = next(px for s, px in frames if s == APPICON_SIZE)
     _write_c_rgba(
@@ -300,33 +317,34 @@ def main() -> int:
         "clumzy_appicon_rgba",
         "createClumzyAppIconImage",
         APPICON_SIZE,
+        APPICON_SIZE,
         app,
     )
-    logo = next(px for s, px in frames if s == LOGO_SIZE)
+    logo_w = max(1, int(round(LOGO_H * w / float(h))))
+    logo = _scale_to_fit(w, h, rgba, logo_w, LOGO_H)
     _write_c_rgba(
         ROOT / "src" / "clumzy_logo.c",
         "CLUMZY_LOGO_W",
         "CLUMZY_LOGO_H",
         "clumzy_logo_rgba",
         "createClumzyLogoImage",
-        LOGO_SIZE,
+        logo_w,
+        LOGO_H,
         logo,
     )
     PREVIEW_DIR.mkdir(exist_ok=True)
     for s, px in frames:
-        _write_preview_png(PREVIEW_DIR / f"icon-preview-{s}.png", s, px)
-        _write_preview_png(
-            PREVIEW_DIR / f"icon-preview-{s}-check.png", s, _on_checker(px, s)
-        )
-    _write_preview_png(PREVIEW_DIR / "logo-preview-48.png", LOGO_SIZE, logo)
+        _write_preview_png(PREVIEW_DIR / f"icon-preview-{s}.png", s, s, px)
+    _write_preview_png(PREVIEW_DIR / f"logo-preview-{logo_w}x{LOGO_H}.png", logo_w, LOGO_H, logo)
     _write_preview_png(
-        PREVIEW_DIR / f"logo-preview-{LOGO_SIZE}-check.png",
-        LOGO_SIZE,
-        _on_checker(logo, LOGO_SIZE),
+        PREVIEW_DIR / f"logo-preview-{logo_w}x{LOGO_H}-dark.png",
+        logo_w,
+        LOGO_H,
+        _composite(logo, logo_w, LOGO_H, (0x14, 0x14, 0x14)),
     )
     print(f"wrote {OUT} ({', '.join(str(s) for s, _ in frames)})")
-    print("wrote src/clumzy_appicon.c")
-    print("wrote src/clumzy_logo.c")
+    print(f"wrote src/clumzy_appicon.c")
+    print(f"wrote src/clumzy_logo.c ({logo_w}x{LOGO_H})")
     return 0
 
 
