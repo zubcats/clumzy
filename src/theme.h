@@ -25,4 +25,5 @@ void applyClumzyGlobals(void);
 void applyClumzyTheme(Ihandle *root);
 void clumzySetControlsEnabled(Ihandle *root, int enabled);
 int clumzyGetControlsEnabled(Ihandle *root);
+void clumzyRefreshControlsEnabled(Ihandle *root);
 void clumzyLockText(Ihandle *ih, int locked);

@@ -1350,6 +1350,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialogVBox, "NCMARGIN", "4x4");
     IupSetAttribute(dialogVBox, "NCGAP", "4x2");
     applyClumzyTheme(dialog);
+    clumzyRefreshControlsEnabled(dialog);
     IupSetAttribute(statusLabel, "FGCOLOR", UI_TEXT_MUTE);
 
     // setup timer

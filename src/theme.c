@@ -121,22 +121,55 @@ static void themeOne(Ihandle *ih) {
     }
 }
 
+static int lockedTextKAny(Ihandle *ih, int c) {
+    (void)c;
+    return IupGetInt(ih, "CLUMZY_LOCKED") ? IUP_IGNORE : IUP_CONTINUE;
+}
+
+static int lockedTextChanged(Ihandle *ih) {
+    Icallback prev;
+
+    if (IupGetInt(ih, "CLUMZY_LOCKED")) {
+        const char *locked = IupGetAttribute(ih, "CLUMZY_LOCKVALUE");
+        const char *cur = IupGetAttribute(ih, "VALUE");
+        if (locked && (!cur || strcmp(locked, cur) != 0)) {
+            IupStoreAttribute(ih, "VALUE", locked);
+        }
+        return IUP_DEFAULT;
+    }
+    prev = (Icallback)IupGetAttribute(ih, "__CLUMZY_VC");
+    return prev ? prev(ih) : IUP_DEFAULT;
+}
+
+static void installTextLockGuards(Ihandle *ih) {
+    if (IupGetInt(ih, "CLUMZY_GUARDS")) {
+        return;
+    }
+    IupSetInt(ih, "CLUMZY_GUARDS", 1);
+    IupSetAttribute(ih, "__CLUMZY_VC", (char*)IupGetCallback(ih, "VALUECHANGED_CB"));
+    IupSetCallback(ih, "VALUECHANGED_CB", (Icallback)lockedTextChanged);
+    IupSetCallback(ih, "K_ANY", (Icallback)lockedTextKAny);
+}
+
+/* Native Win32 edits/toggles paint white when ACTIVE=NO or READONLY=YES.
+   Keep them active and only mute colors. */
 static void enableOne(Ihandle *ih, int enabled) {
     const char *cls = IupGetClassName(ih);
     if (!cls) {
         return;
     }
     if (strcmp(cls, "text") == 0) {
-        IupSetAttribute(ih, "READONLY", enabled ? "NO" : "YES");
+        IupSetAttribute(ih, "READONLY", "NO");
         IupSetAttribute(ih, "ACTIVE", "YES");
+        IupSetAttribute(ih, "CANFOCUS", "YES");
         IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
         IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
     } else if (strcmp(cls, "toggle") == 0) {
-        IupSetAttribute(ih, "ACTIVE", enabled ? "YES" : "NO");
+        IupSetAttribute(ih, "ACTIVE", "YES");
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
         IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
     } else if (strcmp(cls, "flatbutton") == 0) {
-        IupSetAttribute(ih, "ACTIVE", enabled ? "YES" : "NO");
+        IupSetAttribute(ih, "ACTIVE", "YES");
         IupSetAttribute(ih, "BGCOLOR", UI_SURFACE);
         IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
         IupSetAttribute(ih, "HLCOLOR", UI_HOVER);
@@ -171,14 +204,39 @@ int clumzyGetControlsEnabled(Ihandle *root) {
     return root ? IupGetInt(root, "CLUMZY_ENABLED") : 0;
 }
 
+static void refreshWalk(Ihandle *ih) {
+    Ihandle *child;
+    if (!ih) {
+        return;
+    }
+    if (IupGetAttribute(ih, "CLUMZY_ENABLED")) {
+        enableWalk(ih, IupGetInt(ih, "CLUMZY_ENABLED"));
+    }
+    child = IupGetNextChild(ih, NULL);
+    while (child) {
+        refreshWalk(child);
+        child = IupGetBrother(child);
+    }
+}
+
+void clumzyRefreshControlsEnabled(Ihandle *root) {
+    refreshWalk(root);
+}
+
 void clumzyLockText(Ihandle *ih, int locked) {
     if (!ih) {
         return;
     }
-    IupSetAttribute(ih, "READONLY", locked ? "YES" : "NO");
+    installTextLockGuards(ih);
+    IupSetInt(ih, "CLUMZY_LOCKED", locked);
+    IupSetAttribute(ih, "READONLY", "NO");
     IupSetAttribute(ih, "ACTIVE", "YES");
+    IupSetAttribute(ih, "CANFOCUS", locked ? "NO" : "YES");
     IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
     IupSetAttribute(ih, "FGCOLOR", locked ? UI_TEXT_MUTE : UI_TEXT);
+    if (locked) {
+        IupStoreAttribute(ih, "CLUMZY_LOCKVALUE", IupGetAttribute(ih, "VALUE"));
+    }
 }
 
 void applyClumzyTheme(Ihandle *root) {
