@@ -2,8 +2,6 @@
 #include <windows.h>
 #include "theme.h"
 
-#define CHECK_PX 14
-#define CLUMZY_LABEL "__CLUMZY_LABEL"
 #define CLUMZY_FG "__CLUMZY_FG"
 
 typedef HRESULT (WINAPI *SetWindowTheme_t)(HWND, LPCWSTR, LPCWSTR);
@@ -56,7 +54,9 @@ static void stripVisualStyles(HWND hwnd) {
     }
 }
 
-static void skinHwndTree(HWND hwnd) {
+/* Only the HWND of one edit/combo. Walking the dialog tree also hits
+ * labels and checkboxes; untheming those paints them solid white. */
+static void skinEditHwnd(HWND hwnd) {
     HWND child;
     if (!hwnd) {
         return;
@@ -65,51 +65,10 @@ static void skinHwndTree(HWND hwnd) {
     stripVisualStyles(hwnd);
     child = FindWindowExA(hwnd, NULL, NULL, NULL);
     while (child) {
-        skinHwndTree(child);
+        allowDark(child);
+        stripVisualStyles(child);
         child = FindWindowExA(hwnd, child, NULL, NULL);
     }
-}
-
-static void ensureCheckImages(void) {
-    unsigned char offPix[CHECK_PX * CHECK_PX];
-    unsigned char onPix[CHECK_PX * CHECK_PX];
-    Ihandle *off;
-    Ihandle *on;
-    int x, y, i;
-
-    if (IupGetHandle("clumzy_check_off")) {
-        return;
-    }
-    for (y = 0; y < CHECK_PX; ++y) {
-        for (x = 0; x < CHECK_PX; ++x) {
-            i = y * CHECK_PX + x;
-            offPix[i] = (x == 0 || y == 0 || x == CHECK_PX - 1 || y == CHECK_PX - 1) ? 1 : 0;
-            onPix[i] = offPix[i];
-        }
-    }
-    for (i = 0; i < 4; ++i) {
-        onPix[(8 + i) * CHECK_PX + (3 + i)] = 2;
-    }
-    for (i = 0; i < 6; ++i) {
-        onPix[(10 - i) * CHECK_PX + (6 + i)] = 2;
-    }
-
-    off = IupImage(CHECK_PX, CHECK_PX, offPix);
-    on = IupImage(CHECK_PX, CHECK_PX, onPix);
-    IupSetAttribute(off, "0", UI_SURFACE);
-    IupSetAttribute(off, "1", UI_SAGE);
-    IupSetAttribute(off, "2", UI_ACCENT);
-    IupSetAttribute(on, "0", UI_SURFACE);
-    IupSetAttribute(on, "1", UI_SAGE);
-    IupSetAttribute(on, "2", UI_ACCENT);
-    IupSetAttribute(off, "AUTOSCALE", "NO");
-    IupSetAttribute(on, "AUTOSCALE", "NO");
-    IupSetHandle("clumzy_check_off", off);
-    IupSetHandle("clumzy_check_on", on);
-}
-
-static void syncToggleImage(Ihandle *ih) {
-    IupSetAttribute(ih, "IMAGE", IupGetInt(ih, "VALUE") ? "clumzy_check_on" : "clumzy_check_off");
 }
 
 static void styleFrame(Ihandle *frame) {
@@ -137,8 +96,11 @@ static void styleButton(Ihandle *btn) {
     IupSetAttribute(btn, "SHOWBORDER", "YES");
 }
 
-static int isLabelButton(Ihandle *ih) {
-    return IupGetInt(ih, CLUMZY_LABEL);
+static void styleToggle(Ihandle *toggle, int enabled) {
+    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
+    IupSetAttribute(toggle, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    IupSetAttribute(toggle, "FLAT", "YES");
+    IupSetAttribute(toggle, "ACTIVE", "YES");
 }
 
 static const char *labelFg(Ihandle *label, int enabled) {
@@ -149,38 +111,10 @@ static const char *labelFg(Ihandle *label, int enabled) {
     return enabled ? UI_ACCENT : UI_SAGE;
 }
 
-static void styleLabelButton(Ihandle *label, int enabled) {
-    const char *fg = labelFg(label, enabled);
-    IupSetAttribute(label, CLUMZY_LABEL, "1");
+static void styleLabel(Ihandle *label, int enabled) {
     IupSetAttribute(label, "BGCOLOR", UI_BG);
-    IupSetAttribute(label, "FGCOLOR", fg);
-    IupSetAttribute(label, "HLCOLOR", UI_BG);
-    IupSetAttribute(label, "PSCOLOR", UI_BG);
-    IupSetAttribute(label, "TEXTHLCOLOR", fg);
-    IupSetAttribute(label, "TEXTPSCOLOR", fg);
-    IupSetAttribute(label, "BORDERWIDTH", "0");
-    IupSetAttribute(label, "SHOWBORDER", "NO");
-    IupSetAttribute(label, "ALIGNMENT", "ALEFT:ACENTER");
+    IupSetAttribute(label, "FGCOLOR", labelFg(label, enabled));
     IupSetAttribute(label, "ACTIVE", "YES");
-}
-
-/* CHECKSIZE=0 so IUP paints BGCOLOR. The system checkbox skips that fill. */
-static void styleToggle(Ihandle *toggle, int enabled) {
-    ensureCheckImages();
-    IupSetAttribute(toggle, "CHECKSIZE", "0");
-    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
-    IupSetAttribute(toggle, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "HLCOLOR", UI_HOVER);
-    IupSetAttribute(toggle, "PSCOLOR", UI_PRESS);
-    IupSetAttribute(toggle, "TEXTHLCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "TEXTPSCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "BORDERWIDTH", "0");
-    IupSetAttribute(toggle, "SHOWBORDER", "NO");
-    IupSetAttribute(toggle, "ALIGNMENT", "ALEFT:ACENTER");
-    IupSetAttribute(toggle, "IMAGEPOSITION", "LEFT");
-    IupSetAttribute(toggle, "EXPAND", "NO");
-    IupSetAttribute(toggle, "ACTIVE", "YES");
-    syncToggleImage(toggle);
 }
 
 static void styleText(Ihandle *ih, int enabled) {
@@ -188,17 +122,6 @@ static void styleText(Ihandle *ih, int enabled) {
     IupSetAttribute(ih, "ACTIVE", "YES");
     IupSetAttribute(ih, "BGCOLOR", UI_INPUT_BG);
     IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-}
-
-static int toggleFlatAction(Ihandle *ih, int state) {
-    Icallback prev;
-    syncToggleImage(ih);
-    prev = IupGetCallback(ih, "ACTION");
-    return prev ? ((int (*)(Ihandle *, int))prev)(ih, state) : IUP_DEFAULT;
-}
-
-static void copyToggleAction(Ihandle *ih) {
-    IupSetCallback(ih, "FLAT_ACTION", (Icallback)toggleFlatAction);
 }
 
 static void copyActionToFlat(Ihandle *ih) {
@@ -221,21 +144,18 @@ Ihandle *clumzyButton(const char *title) {
 }
 
 Ihandle *clumzyToggle(const char *title) {
-    Ihandle *toggle = IupFlatToggle(title);
+    Ihandle *toggle = IupToggle(title, NULL);
     styleToggle(toggle, 1);
     return toggle;
 }
 
 Ihandle *clumzyLabel(const char *title) {
-    Ihandle *label;
-    if (!title) {
-        label = IupLabel(NULL);
+    Ihandle *label = IupLabel(title);
+    if (title) {
+        styleLabel(label, 1);
+    } else {
         IupSetAttribute(label, "BGCOLOR", UI_BG);
-        return label;
     }
-    label = IupFlatButton(title);
-    IupSetAttribute(label, "CANFOCUS", "NO");
-    styleLabelButton(label, 1);
     return label;
 }
 
@@ -269,7 +189,6 @@ void clumzyInitDarkMode(void) {
 
 void applyClumzyGlobals(void) {
     preferWinDarkMode();
-    ensureCheckImages();
     IupSetGlobal("DLGBGCOLOR", UI_BG);
     IupSetGlobal("TXTBGCOLOR", UI_INPUT_BG);
     IupSetGlobal("TXTFGCOLOR", UI_TEXT);
@@ -302,8 +221,6 @@ static int ancestorEnabled(Ihandle *ih) {
     return 1;
 }
 
-/* After map: dark title bar + untheme native edits/combos only. Do not
- * change SIZE or walk every HWND — that retriggered MAP/SHOW and hung. */
 static void skinAfterMap(Ihandle *ih) {
     const char *cls;
     HWND hwnd;
@@ -322,7 +239,7 @@ static void skinAfterMap(Ihandle *ih) {
             clumzyApplyWindowDarkMode(hwnd);
         }
     } else if (cls && hwnd && (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0)) {
-        skinHwndTree(hwnd);
+        skinEditHwnd(hwnd);
         styleText(ih, ancestorEnabled(ih));
         InvalidateRect(hwnd, NULL, TRUE);
     }
@@ -344,20 +261,7 @@ void clumzyOnMapped(Ihandle *ih) {
 }
 
 void clumzySyncToggleImages(Ihandle *root) {
-    Ihandle *child;
-    const char *cls;
-    if (!root) {
-        return;
-    }
-    cls = IupGetClassName(root);
-    if (cls && strcmp(cls, "flattoggle") == 0) {
-        syncToggleImage(root);
-    }
-    child = IupGetNextChild(root, NULL);
-    while (child) {
-        clumzySyncToggleImages(child);
-        child = IupGetBrother(child);
-    }
+    (void)root;
 }
 
 void clumzySyncList(Ihandle *ih) {
@@ -402,22 +306,19 @@ static void themeOne(Ihandle *ih) {
             styleFrame(ih);
         }
     } else if (strcmp(cls, "label") == 0) {
-        IupSetAttribute(ih, "BGCOLOR", UI_BG);
         if (IupGetAttribute(ih, "IMAGE")) {
             IupSetAttribute(ih, "EXPAND", "NO");
+            IupSetAttribute(ih, "BGCOLOR", UI_BG);
+        } else {
+            styleLabel(ih, 1);
         }
     } else if (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0) {
         styleText(ih, 1);
-    } else if (strcmp(cls, "flattoggle") == 0) {
+    } else if (strcmp(cls, "toggle") == 0) {
         styleToggle(ih, 1);
-        copyToggleAction(ih);
     } else if (strcmp(cls, "flatbutton") == 0) {
-        if (isLabelButton(ih)) {
-            styleLabelButton(ih, 1);
-        } else {
-            styleButton(ih);
-            copyActionToFlat(ih);
-        }
+        styleButton(ih);
+        copyActionToFlat(ih);
     }
 }
 
@@ -459,16 +360,14 @@ static void enableOne(Ihandle *ih, int enabled) {
     if (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0) {
         IupSetAttribute(ih, "CANFOCUS", "YES");
         styleText(ih, enabled);
-    } else if (strcmp(cls, "flattoggle") == 0) {
+    } else if (strcmp(cls, "toggle") == 0) {
         styleToggle(ih, enabled);
     } else if (strcmp(cls, "flatbutton") == 0) {
-        if (isLabelButton(ih)) {
-            styleLabelButton(ih, enabled);
-        } else {
-            styleButton(ih);
-            IupSetAttribute(ih, "ACTIVE", "YES");
-            IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-        }
+        styleButton(ih);
+        IupSetAttribute(ih, "ACTIVE", "YES");
+        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    } else if (strcmp(cls, "label") == 0 && !IupGetAttribute(ih, "IMAGE")) {
+        styleLabel(ih, enabled);
     }
 }
 
@@ -530,8 +429,7 @@ void clumzyLockText(Ihandle *ih, int locked) {
     }
     hwnd = (HWND)IupGetAttribute(ih, "HWND");
     if (hwnd) {
-        stripVisualStyles(hwnd);
-        allowDark(hwnd);
+        skinEditHwnd(hwnd);
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }

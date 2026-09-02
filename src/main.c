@@ -1304,9 +1304,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(label1, "EXPAND", "HORIZONTAL");
     IupSetAttribute(middleFrame, "TITLE", "Info");
     IupSetAttribute(middleFrame, "EXPAND", "HORIZONTAL");
-    
 
-    IupSetAttribute(label2, "EXPAND", "HORIZONTAL");
     IupSetAttribute(lowerMiddleFrame, "TITLE", "Extra Presets");
     IupSetAttribute(lowerMiddleFrame, "EXPAND", "HORIZONTAL");
     IupSetAttribute(filterSelectList3, "VISIBLECOLUMNS", "15");
