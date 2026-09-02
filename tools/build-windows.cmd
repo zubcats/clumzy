@@ -53,9 +53,12 @@ copy /y external\iup-3.30_Win64_dll16_lib\iup.dll dist\stage\ || exit /b 1
 copy /y etc\config.txt dist\stage\ || exit /b 1
 copy /y etc\presets.ini dist\stage\ || exit /b 1
 copy /y etc\clumzy-logo.png dist\stage\ || exit /b 1
+copy /y etc\clumzy-icon.ico dist\stage\ || exit /b 1
 copy /y LICENSE dist\stage\LICENSE.txt || exit /b 1
 
 python -m pip install --disable-pip-version-check -q -r gui\requirements.txt || exit /b 1
+python tools\build_clumzy_icon.py || exit /b 1
+copy /y etc\clumzy-icon.ico dist\stage\ || exit /b 1
 
 set "CLUMZY_ICON=%CD%\etc\clumzy-icon.ico"
 set "CLUMZY_LOGO=%CD%\etc\clumzy-logo.png"
@@ -63,11 +66,16 @@ if not exist "!CLUMZY_LOGO!" (
   echo Missing logo: !CLUMZY_LOGO!
   exit /b 1
 )
+if not exist "!CLUMZY_ICON!" (
+  echo Missing icon: !CLUMZY_ICON!
+  exit /b 1
+)
 
 python -m PyInstaller --noconfirm --clean --windowed --uac-admin ^
   --name Clumzy ^
   --icon "!CLUMZY_ICON!" ^
   --add-data "!CLUMZY_LOGO!;." ^
+  --add-data "!CLUMZY_ICON!;." ^
   --hidden-import PyQt5.sip ^
   --distpath dist\py --workpath dist\pybuild --specpath dist\pybuild ^
   gui\clumzy_app.py || exit /b 1

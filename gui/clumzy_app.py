@@ -8,7 +8,7 @@ import sys
 from ctypes import c_char_p, c_float, c_int
 
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QIcon, QPalette, QPixmap
+from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -72,6 +72,61 @@ def resource_path(*parts: str) -> str:
         if os.path.isfile(path):
             return path
     return candidates[0]
+
+
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
+
+
+def set_win_app_id() -> None:
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('zubcats.Clumzy')
+    except Exception:
+        pass
+
+
+def load_app_icon() -> QIcon:
+    icon = QIcon()
+    ico_path = resource_path('clumzy-icon.ico')
+    if os.path.isfile(ico_path):
+        icon.addFile(ico_path)
+    png_path = resource_path('clumzy-logo.png')
+    pix = QPixmap(png_path) if os.path.isfile(png_path) else QPixmap()
+    if pix.isNull():
+        return icon
+    for size in ICON_SIZES:
+        canvas = QPixmap(size, size)
+        canvas.fill(QColor('#141414'))
+        fitted = pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap((size - fitted.width()) // 2, (size - fitted.height()) // 2, fitted)
+        painter.end()
+        icon.addPixmap(canvas)
+    return icon
+
+
+def apply_taskbar_icon(hwnd: int, ico_path: str) -> None:
+    if not hwnd or not os.path.isfile(ico_path):
+        return
+    user32 = ctypes.windll.user32
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE = 0x0010
+    WM_SETICON = 0x0080
+    path = os.path.abspath(ico_path)
+    user32.LoadImageW.argtypes = [
+        ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+        ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+    ]
+    user32.LoadImageW.restype = ctypes.c_void_p
+    user32.SendMessageW.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p,
+    ]
+    small = user32.LoadImageW(None, path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+    big = user32.LoadImageW(None, path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+    if small:
+        user32.SendMessageW(hwnd, WM_SETICON, 0, small)
+    if big:
+        user32.SendMessageW(hwnd, WM_SETICON, 1, big)
 
 
 def zubcut_qss() -> str:
@@ -412,9 +467,7 @@ class ClumzyWindow(QMainWindow):
         self._worker = None
         self.setWindowTitle('Clumzy 2.0')
         self.setObjectName('clumzyMain')
-        icon_path = resource_path('clumzy-icon.ico')
-        if os.path.isfile(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        self.setWindowIcon(load_app_icon())
 
         root = QWidget()
         root.setObjectName('clumzyRoot')
@@ -850,9 +903,11 @@ def already_running() -> bool:
 
 def main() -> int:
     os.chdir(app_dir())
+    set_win_app_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     app = QApplication(sys.argv)
     app.setApplicationName('Clumzy')
+    app.setWindowIcon(load_app_icon())
     app.setStyle('Fusion')
     apply_fusion_palette(app)
     font = QFont('Segoe UI', 9)
@@ -880,7 +935,9 @@ def main() -> int:
     window.setStyleSheet(zubcut_qss())
     window.resize(860, 760)
     window.show()
-    apply_dark_titlebar(int(window.winId()))
+    hwnd = int(window.winId())
+    apply_dark_titlebar(hwnd)
+    apply_taskbar_icon(hwnd, resource_path('clumzy-icon.ico'))
     return app.exec_()
 
 
