@@ -19,9 +19,13 @@ concurrency:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -51,4 +55,4 @@ jobs:
             Portable Windows x64 build.
 
             Unzip, right-click **Clumzy.exe** → Run as administrator.
-            Keep `iup.dll`, `WinDivert.dll`, `WinDivert64.sys`, `config.txt`, and `presets.ini` next to the exe.
+            Keep `clumzy_engine.dll`, `iup.dll`, `WinDivert.dll`, `WinDivert64.sys`, `config.txt`, and `presets.ini` next to the exe.

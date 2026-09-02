@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include <assert.h>
 #include "iup.h"
+#ifndef CLUMZY_ENGINE_ONLY
 #include "theme.h"
-#include "windivert.h"
-
 #define IupFrame(child) clumzyFrame(child)
 #define IupButton(title, action) clumzyButton(title)
+#endif
+#include "windivert.h"
 
 #define APP_NAME "Clumzy"
 #define CLUMSY_VERSION "2.0"
@@ -175,6 +176,11 @@ void divertStop();
 #define STR(x) STR_HELPER(x)
 
 short calcChance(short chance);
+int clumzyParseOn(const char *value);
+void clumzySetToggle(Ihandle *ih, volatile short *flag, const char *value);
+void clumzySetChance(Ihandle *ih, volatile short *flag, const char *value);
+void clumzySetInteger(Ihandle *ih, volatile short *flag, const char *value);
+void clumzySetLong(Ihandle *ih, volatile long *flag, const char *value);
 
 // inline helper for inbound outbound check
 static INLINE_FUNCTION

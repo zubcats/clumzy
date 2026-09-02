@@ -1,5 +1,6 @@
 // bandwidth cap module
 #include <stdlib.h>
+#include <string.h>
 #include <Windows.h>
 #include <stdint.h>
 
@@ -463,35 +464,53 @@ int32_t crate_stats_calculate(CRateStats *rate, uint32_t now_ts)
 	return (int32_t)r;
 }
 
+void clumzy_apply_bandwidth(int inbound, int outbound, int limit, int queue_size, int kb) {
+    if (limit < 0) limit = 0;
+    if (queue_size < 0) queue_size = 0;
+    InterlockedExchange16((short*)&bandwidthInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&bandwidthOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange(&bandwidthLimit, (LONG)limit);
+    InterlockedExchange16((short*)&maxQueueSizeInKBytes, I2S(queue_size));
+    kbtoggle = kb ? 0 : 1;
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (bandwidthInput) {
+        char buf[16];
+        sprintf(buf, "%d", limit);
+        IupSetAttribute(bandwidthInput, "VALUE", buf);
+    }
+    if (queueSizeInput) {
+        char buf[16];
+        sprintf(buf, "%d", queue_size);
+        IupSetAttribute(queueSizeInput, "VALUE", buf);
+    }
+    if (speedButton) {
+        if (kb) {
+            IupSetAttribute(speedButton, "TITLE", "KB/s");
+            if (queuesizeLabel) IupSetAttribute(queuesizeLabel, "TITLE", "Queuesize(KB)");
+            if (limitLabel) IupSetAttribute(limitLabel, "TITLE", "Limit(KB/s)");
+        } else {
+            IupSetAttribute(speedButton, "TITLE", "MB/s");
+            if (queuesizeLabel) IupSetAttribute(queuesizeLabel, "TITLE", "Queuesize(MB)");
+            if (limitLabel) IupSetAttribute(limitLabel, "TITLE", "Limit(MB/s)");
+        }
+    }
+}
+
 void Set_Bandwidth_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &bandwidthInbound, value);
 }
 void Set_Bandwidth_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &bandwidthOutbound, value);
 }
 void Set_Bandwidth_bandwidthInput(const char* value) {
-    IupSetAttribute(bandwidthInput, "VALUE", value);
+    clumzySetLong(bandwidthInput, (volatile long*)&bandwidthLimit, value);
 }
 void Set_Bandwidth_queueSizeInput(const char* value) {
-    IupSetAttribute(queueSizeInput, "VALUE", value);
+    clumzySetInteger(queueSizeInput, &maxQueueSizeInKBytes, value);
 }
 void Set_Bandwidth_speed(const char* value) {
-    if (strcmp(value, "kb") == 0) {
-        kbtoggle = 1;
-    }else {
-        kbtoggle = 0;
-    }
-
-    if (kbtoggle) {
-        IupSetAttribute(speedButton, "TITLE", "KB/s");
-        IupSetAttribute(queuesizeLabel, "TITLE", "Queuesize(KB)");
-        IupSetAttribute(limitLabel, "TITLE", "Limit(KB/s)");
-        kbtoggle = 0;
-    }else {
-        IupSetAttribute(speedButton, "TITLE", "MB/s");
-        IupSetAttribute(queuesizeLabel, "TITLE", "Queuesize(MB)");
-        IupSetAttribute(limitLabel, "TITLE", "Limit(MB/s)");
-        kbtoggle = 1;
-    }
-
+    clumzy_apply_bandwidth(bandwidthInbound, bandwidthOutbound,
+        (int)bandwidthLimit, maxQueueSizeInKBytes,
+        value && _stricmp(value, "kb") == 0);
 }

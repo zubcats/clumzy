@@ -1,5 +1,6 @@
 // duplicate packet module
 #include <stdlib.h>
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "duplicate"
@@ -96,15 +97,38 @@ Module dupModule = {
     0, 0, NULL
 };
 
+void clumzy_apply_duplicate(int inbound, int outbound, float chance_pct, int copies) {
+    if (chance_pct > 100.0f) chance_pct = 100.0f;
+    if (chance_pct < 0.0f) chance_pct = 0.0f;
+    if (copies < 0) copies = 0;
+    if (copies > 50) copies = 50;
+    InterlockedExchange16((short*)&dupInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&dupOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&chance, (short)(chance_pct * 100.0f));
+    InterlockedExchange16((short*)&count, I2S(copies));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (chanceInput) {
+        char buf[16];
+        sprintf(buf, "%.1f", chance_pct);
+        IupSetAttribute(chanceInput, "VALUE", buf);
+    }
+    if (countInput) {
+        char buf[16];
+        sprintf(buf, "%d", copies);
+        IupSetAttribute(countInput, "VALUE", buf);
+    }
+}
+
 void Set_Duplicate_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &dupInbound, value);
 }
 void Set_Duplicate_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &dupOutbound, value);
 }
 void Set_Duplicate_chanceInput(const char* value) {
-    IupSetAttribute(chanceInput, "VALUE", value);
+    clumzySetChance(chanceInput, &chance, value);
 }
 void Set_Duplicate_countInput(const char* value) {
-    IupSetAttribute(countInput, "VALUE", value);
+    clumzySetInteger(countInput, &count, value);
 }

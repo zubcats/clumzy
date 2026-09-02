@@ -10,6 +10,7 @@ void Set_Bandwidth_outboundCheckbox(const char* value);
 void Set_Bandwidth_bandwidthInput(const char* value);
 void Set_Bandwidth_queueSizeInput(const char* value);
 void Set_Bandwidth_speed(const char* value);
+void clumzy_apply_bandwidth(int inbound, int outbound, int limit, int queue_size, int kb);
 
 
 #endif // BANDWIDTH_H

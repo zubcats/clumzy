@@ -1,4 +1,5 @@
 // lagging packets
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "lag"
@@ -135,13 +136,27 @@ Module lagModule = {
 };
 
 
+void clumzy_apply_lag(int inbound, int outbound, int time_ms) {
+    if (time_ms < 0) time_ms = 0;
+    if (time_ms > 15000) time_ms = 15000;
+    InterlockedExchange16((short*)&lagInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&lagOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&lagTime, I2S(time_ms));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (timeInput) {
+        char buf[16];
+        sprintf(buf, "%d", time_ms);
+        IupSetAttribute(timeInput, "VALUE", buf);
+    }
+}
+
 void Set_Lag_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &lagInbound, value);
 }
 void Set_Lag_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &lagOutbound, value);
 }
 void Set_Lag_timeInput(const char* value) {
-   
-   IupSetAttribute(timeInput, "VALUE", value);
+    clumzySetInteger(timeInput, &lagTime, value);
 }

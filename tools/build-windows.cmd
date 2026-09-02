@@ -24,30 +24,48 @@ if errorlevel 1 (
   call "!VCVARS!" || exit /b 1
 )
 
+where python >nul 2>&1
+if errorlevel 1 (
+  echo Python is required to build the Qt UI.
+  exit /b 1
+)
+
 if exist dist rmdir /s /q dist
-mkdir dist\obj dist\stage || exit /b 1
+mkdir dist\obj_engine dist\stage || exit /b 1
 
-rc /nologo /d NDEBUG /d X64 /fo dist\clumzy.res etc\clumsy.rc || exit /b 1
-
-cl /nologo /c /O2 /DNDEBUG /DX64 /D_CRT_SECURE_NO_WARNINGS /wd4214 /std:c11 ^
+cl /nologo /c /O2 /DNDEBUG /DX64 /DCLUMZY_ENGINE_ONLY /D_CRT_SECURE_NO_WARNINGS /wd4214 /std:c11 ^
   /I external\WinDivert-2.2.0-A\include ^
   /I external\iup-3.30_Win64_dll16_lib\include ^
-  /Fodist\obj\ ^
-  src\*.c || exit /b 1
+  /Fodist\obj_engine\ ^
+  src\bandwidth.c src\clumzy_api.c src\disconnect.c src\divert.c src\drop.c src\duplicate.c ^
+  src\elevate.c src\lag.c src\modules.c src\ood.c src\packet.c src\reset.c src\tamper.c ^
+  src\throttle.c src\utils.c || exit /b 1
 
-link /nologo /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /SAFESEH:NO ^
-  /OUT:dist\stage\Clumzy.exe ^
-  dist\obj\*.obj dist\clumzy.res ^
+link /nologo /DLL /SAFESEH:NO /OUT:dist\stage\clumzy_engine.dll ^
+  dist\obj_engine\*.obj ^
   /LIBPATH:external\WinDivert-2.2.0-A\x64 ^
   /LIBPATH:external\iup-3.30_Win64_dll16_lib ^
-  iup.lib WinDivert.lib comctl32.lib winmm.lib ws2_32.lib gdi32.lib comdlg32.lib uuid.lib ole32.lib kernel32.lib user32.lib advapi32.lib shell32.lib || exit /b 1
+  iup.lib WinDivert.lib winmm.lib ws2_32.lib kernel32.lib user32.lib advapi32.lib shell32.lib || exit /b 1
 
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert.dll dist\stage\ || exit /b 1
 copy /y external\WinDivert-2.2.0-A\x64\WinDivert64.sys dist\stage\ || exit /b 1
 copy /y external\iup-3.30_Win64_dll16_lib\iup.dll dist\stage\ || exit /b 1
 copy /y etc\config.txt dist\stage\ || exit /b 1
 copy /y etc\presets.ini dist\stage\ || exit /b 1
+copy /y etc\clumzy-logo.png dist\stage\ || exit /b 1
 copy /y LICENSE dist\stage\LICENSE.txt || exit /b 1
+
+python -m pip install --disable-pip-version-check -q -r gui\requirements.txt || exit /b 1
+
+python -m PyInstaller --noconfirm --clean --windowed --uac-admin ^
+  --name Clumzy ^
+  --icon etc\clumzy-icon.ico ^
+  --add-data "etc\clumzy-logo.png;." ^
+  --hidden-import PyQt5.sip ^
+  --distpath dist\py --workpath dist\pybuild --specpath dist ^
+  gui\clumzy_app.py || exit /b 1
+
+xcopy /e /y /q dist\py\Clumzy\* dist\stage\ || exit /b 1
 
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\stage\*' -DestinationPath 'dist\Clumzy-windows-x64.zip' -Force" || exit /b 1
 

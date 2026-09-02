@@ -1,7 +1,55 @@
 #include <stdlib.h>
+#include <string.h>
 #include <Windows.h>
 #include "iup.h"
 #include "common.h"
+
+int clumzyParseOn(const char *value) {
+    if (!value || !value[0]) {
+        return 0;
+    }
+    if (_stricmp(value, "on") == 0 || _stricmp(value, "true") == 0 ||
+        _stricmp(value, "yes") == 0 || strcmp(value, "1") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+void clumzySetToggle(Ihandle *ih, volatile short *flag, const char *value) {
+    InterlockedExchange16((short*)flag, I2S(clumzyParseOn(value)));
+    if (ih) {
+        IupSetAttribute(ih, "VALUE", *flag ? "ON" : "OFF");
+    }
+}
+
+void clumzySetChance(Ihandle *ih, volatile short *flag, const char *value) {
+    float v = value ? (float)atof(value) : 0.0f;
+    if (v > 100.0f) {
+        v = 100.0f;
+    } else if (v < 0.0f) {
+        v = 0.0f;
+    }
+    InterlockedExchange16((short*)flag, (short)(v * 100.0f));
+    if (ih) {
+        IupSetAttribute(ih, "VALUE", value ? value : "0");
+    }
+}
+
+void clumzySetInteger(Ihandle *ih, volatile short *flag, const char *value) {
+    int v = value ? atoi(value) : 0;
+    InterlockedExchange16((short*)flag, I2S(v));
+    if (ih) {
+        IupSetAttribute(ih, "VALUE", value ? value : "0");
+    }
+}
+
+void clumzySetLong(Ihandle *ih, volatile long *flag, const char *value) {
+    long v = value ? atol(value) : 0;
+    InterlockedExchange(flag, v);
+    if (ih) {
+        IupSetAttribute(ih, "VALUE", value ? value : "0");
+    }
+}
 
 short calcChance(short chance) {
     // notice that here we made a copy of chance, so even though it's volatile it is still ok

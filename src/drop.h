@@ -7,5 +7,6 @@
 void Set_Drop_inboundCheckbox(const char* value);
 void Set_Drop_outboundCheckbox(const char* value);
 void Set_Drop_chanceInput(const char* value);
+void clumzy_apply_drop(int inbound, int outbound, float chance_pct);
 
 #endif // DROP_H

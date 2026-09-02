@@ -987,19 +987,6 @@ static int handler6(void* user, const char* section, const char* name, const cha
 }
 
 // ! the order decides which module get processed first
-Module* modules[MODULE_CNT] = {
-    &lagModule,
-    &dropModule,
-    &disconnectModule,
-    &bandwidthModule,
-    &throttleModule,
-    &dupModule,
-    &oodModule,
-    &tamperModule,
-    &resetModule,
-};
-
-volatile short sendState = SEND_STATUS_NONE;
 
 // global iup handlers
 static Ihandle *dialog, *topFrame, * middleFrame, * lowerMiddleFrame, * bottomFrame;
@@ -1059,7 +1046,6 @@ typedef struct {
 UINT filtersSize;
 filterRecord filters[CONFIG_MAX_RECORDS] = {0};
 char configBuf[CONFIG_BUF_SIZE+2]; // add some padding to write \n
-BOOL parameterized = 0; // parameterized flag, means reading args from command line
 
 // loading up filters and fill in
 void loadConfig() {

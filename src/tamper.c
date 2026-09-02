@@ -1,4 +1,5 @@
 // tampering packet module
+#include <Windows.h>
 #include "iup.h"
 #include "windivert.h"
 #include "common.h"
@@ -133,15 +134,32 @@ Module tamperModule = {
 };
 
 
+void clumzy_apply_tamper(int inbound, int outbound, float chance_pct, int redo_checksum) {
+    if (chance_pct > 100.0f) chance_pct = 100.0f;
+    if (chance_pct < 0.0f) chance_pct = 0.0f;
+    InterlockedExchange16((short*)&tamperInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&tamperOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&chance, (short)(chance_pct * 100.0f));
+    InterlockedExchange16((short*)&doChecksum, I2S(redo_checksum ? 1 : 0));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (checksumCheckbox) IupSetAttribute(checksumCheckbox, "VALUE", redo_checksum ? "ON" : "OFF");
+    if (chanceInput) {
+        char buf[16];
+        sprintf(buf, "%.1f", chance_pct);
+        IupSetAttribute(chanceInput, "VALUE", buf);
+    }
+}
+
 void Set_Tamper_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &tamperInbound, value);
 }
 void Set_Tamper_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &tamperOutbound, value);
 }
 void Set_Tamper_chanceInput(const char* value) {
-    IupSetAttribute(chanceInput, "VALUE", value);
+    clumzySetChance(chanceInput, &chance, value);
 }
 void Set_Tamper_checksumCheckbox(const char* value) {
-    IupSetAttribute(checksumCheckbox, "VALUE", value);
+    clumzySetToggle(checksumCheckbox, &doChecksum, value);
 }

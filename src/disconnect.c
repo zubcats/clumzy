@@ -1,3 +1,4 @@
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "disconnect"
@@ -85,10 +86,17 @@ Module disconnectModule = {
     0, 0, NULL
 };
 
+void clumzy_apply_disconnect(int inbound, int outbound) {
+    InterlockedExchange16((short*)&disconnectInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&disconnectOutbound, I2S(outbound ? 1 : 0));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+}
+
 void Set_Disconnect_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &disconnectInbound, value);
 }
 
 void Set_Disconnect_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &disconnectOutbound, value);
 }

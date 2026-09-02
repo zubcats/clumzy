@@ -1,5 +1,6 @@
 // Reset injection packet module
 #include <stdlib.h>
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "reset"
@@ -124,12 +125,31 @@ Module resetModule = {
     // runtime fields
     0, 0, NULL
 };
+void clumzy_apply_reset(int inbound, int outbound, float chance_pct) {
+    if (chance_pct > 100.0f) chance_pct = 100.0f;
+    if (chance_pct < 0.0f) chance_pct = 0.0f;
+    InterlockedExchange16((short*)&resetInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&resetOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&chance, (short)(chance_pct * 100.0f));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (chanceInput) {
+        char buf[16];
+        sprintf(buf, "%.1f", chance_pct);
+        IupSetAttribute(chanceInput, "VALUE", buf);
+    }
+}
+
+void clumzy_apply_reset_next(void) {
+    InterlockedIncrement16(&setNextCount);
+}
+
 void Set_Reset_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &resetInbound, value);
 }
 void Set_Reset_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &resetOutbound, value);
 }
 void Set_Reset_chanceInput(const char* value) {
-    IupSetAttribute(chanceInput, "VALUE", value);
+    clumzySetChance(chanceInput, &chance, value);
 }

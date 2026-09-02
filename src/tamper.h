@@ -9,6 +9,7 @@ void Set_Tamper_outboundCheckbox(const char* value);
 
 void Set_Tamper_chanceInput(const char* value);
 void Set_Tamper_checksumCheckbox(const char* value);
+void clumzy_apply_tamper(int inbound, int outbound, float chance_pct, int redo_checksum);
 
 
 #endif // TAMPER_H

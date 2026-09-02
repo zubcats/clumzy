@@ -17,7 +17,7 @@ GitHub Actions builds a portable zip on every push to `main`:
 
 https://github.com/zubcats/clumzy/releases/latest/download/Clumzy-windows-x64.zip
 
-Unzip and run `Clumzy.exe` as administrator. Leave the DLLs and `presets.ini` in the same folder.
+Unzip and run `Clumzy.exe` as administrator. Leave `clumzy_engine.dll`, the WinDivert files, and `presets.ini` in the same folder.
 
 See [jagt.github.io/clumsy](http://jagt.github.io/clumsy) for background and local build notes.
 

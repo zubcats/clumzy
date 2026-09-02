@@ -1,4 +1,5 @@
 // out of order arrange packets module
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "ood"
@@ -151,12 +152,30 @@ Module oodModule = {
     0, 0, NULL
 };
 
+void clumzy_apply_ood(int inbound, int outbound, float chance_pct) {
+    if (chance_pct > 100.0f) chance_pct = 100.0f;
+    if (chance_pct < 0.0f) chance_pct = 0.0f;
+    InterlockedExchange16((short*)&oodInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&oodOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&chance, (short)(chance_pct * 100.0f));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (chanceInput) {
+        char buf[16];
+        sprintf(buf, "%.1f", chance_pct);
+        IupSetAttribute(chanceInput, "VALUE", buf);
+    }
+}
+
 void Set_OutOfOrder_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &oodInbound, value);
 }
 void Set_OutOfOrder_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &oodOutbound, value);
 }
 void Set_OutOfOrder_chanceInput(const char* value) {
-    IupSetAttribute(chanceInput, "VALUE", value);
+    clumzySetChance(chanceInput, &chance, value);
+}
+void Set_OutOfOrder_countInput(const char* value) {
+    UNREFERENCED_PARAMETER(value);
 }

@@ -1,4 +1,5 @@
 // throttling packets
+#include <Windows.h>
 #include "iup.h"
 #include "common.h"
 #define NAME "throttle"
@@ -169,18 +170,43 @@ Module throttleModule = {
 
 
 
+void clumzy_apply_throttle(int inbound, int outbound, float chance_pct, int timeframe_ms, int drop) {
+    if (chance_pct > 100.0f) chance_pct = 100.0f;
+    if (chance_pct < 0.0f) chance_pct = 0.0f;
+    if (timeframe_ms < 0) timeframe_ms = 0;
+    if (timeframe_ms > 1000) timeframe_ms = 1000;
+    InterlockedExchange16((short*)&throttleInbound, I2S(inbound ? 1 : 0));
+    InterlockedExchange16((short*)&throttleOutbound, I2S(outbound ? 1 : 0));
+    InterlockedExchange16((short*)&chance, (short)(chance_pct * 100.0f));
+    InterlockedExchange16((short*)&throttleFrame, I2S(timeframe_ms));
+    InterlockedExchange16((short*)&dropThrottled, I2S(drop ? 1 : 0));
+    if (inboundCheckbox) IupSetAttribute(inboundCheckbox, "VALUE", inbound ? "ON" : "OFF");
+    if (outboundCheckbox) IupSetAttribute(outboundCheckbox, "VALUE", outbound ? "ON" : "OFF");
+    if (dropThrottledCheckbox) IupSetAttribute(dropThrottledCheckbox, "VALUE", drop ? "ON" : "OFF");
+    if (chanceInput) {
+        char buf[16];
+        sprintf(buf, "%.1f", chance_pct);
+        IupSetAttribute(chanceInput, "VALUE", buf);
+    }
+    if (frameInput) {
+        char buf[16];
+        sprintf(buf, "%d", timeframe_ms);
+        IupSetAttribute(frameInput, "VALUE", buf);
+    }
+}
+
 void Set_Throttle_inboundCheckbox(const char* value) {
-    IupSetAttribute(inboundCheckbox, "VALUE", value);
+    clumzySetToggle(inboundCheckbox, &throttleInbound, value);
 }
 void Set_Throttle_outboundCheckbox(const char* value) {
-    IupSetAttribute(outboundCheckbox, "VALUE", value);
+    clumzySetToggle(outboundCheckbox, &throttleOutbound, value);
 }
 void Set_Throttle_dropThrottledCheckbox(const char* value) {
-    IupSetAttribute(dropThrottledCheckbox, "VALUE", value);
+    clumzySetToggle(dropThrottledCheckbox, &dropThrottled, value);
 }
 void Set_Throttle_frameInpchanceInputut(const char* value) {
-    IupSetAttribute(chanceInput, "VALUE", value);
+    clumzySetChance(chanceInput, &chance, value);
 }
 void Set_Throttle_frameInput(const char* value) {
-    IupSetAttribute(frameInput, "VALUE", value);
+    clumzySetInteger(frameInput, &throttleFrame, value);
 }
