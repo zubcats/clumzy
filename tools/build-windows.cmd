@@ -57,12 +57,19 @@ copy /y LICENSE dist\stage\LICENSE.txt || exit /b 1
 
 python -m pip install --disable-pip-version-check -q -r gui\requirements.txt || exit /b 1
 
+set "CLUMZY_ICON=%CD%\etc\clumzy-icon.ico"
+set "CLUMZY_LOGO=%CD%\etc\clumzy-logo.png"
+if not exist "!CLUMZY_LOGO!" (
+  echo Missing logo: !CLUMZY_LOGO!
+  exit /b 1
+)
+
 python -m PyInstaller --noconfirm --clean --windowed --uac-admin ^
   --name Clumzy ^
-  --icon etc\clumzy-icon.ico ^
-  --add-data "etc\clumzy-logo.png;." ^
+  --icon "!CLUMZY_ICON!" ^
+  --add-data "!CLUMZY_LOGO!;." ^
   --hidden-import PyQt5.sip ^
-  --distpath dist\py --workpath dist\pybuild --specpath dist ^
+  --distpath dist\py --workpath dist\pybuild --specpath dist\pybuild ^
   gui\clumzy_app.py || exit /b 1
 
 xcopy /e /y /q dist\py\Clumzy\* dist\stage\ || exit /b 1
