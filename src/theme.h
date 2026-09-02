@@ -19,6 +19,8 @@
 Ihandle *clumzyFrame(Ihandle *child);
 Ihandle *clumzyButton(const char *title);
 Ihandle *clumzyToggle(const char *title);
+Ihandle *clumzyLabel(const char *title);
+Ihandle *clumzyList(void);
 void clumzySetAction(Ihandle *ih, Icallback cb);
 void clumzyPinImageLabel(Ihandle *label, Ihandle *image, int pad);
 void applyClumzyGlobals(void);
@@ -27,3 +29,4 @@ void clumzySetControlsEnabled(Ihandle *root, int enabled);
 int clumzyGetControlsEnabled(Ihandle *root);
 void clumzyRefreshControlsEnabled(Ihandle *root);
 void clumzyLockText(Ihandle *ih, int locked);
+void clumzyApplyWindowDarkMode(void *hwnd);

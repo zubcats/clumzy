@@ -162,6 +162,9 @@ void setFromParameter(Ihandle *ih, const char *field, const char *key) {
         }
         // cb's argument type IS NOT ONLY Ihandle, receives a extra "state" int
         scb = (IstateCallback)IupGetCallback(ih, "ACTION");
+        if (!scb) {
+            scb = (IstateCallback)IupGetCallback(ih, "FLAT_ACTION");
+        }
         if (scb) {
             LOG("triggered ACTION on key: %s", key);
             // IupGetInt handles yes/no on/off upper lower case things.

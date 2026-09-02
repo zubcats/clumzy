@@ -1351,6 +1351,7 @@ void init(int argc, char* argv[]) {
     IupSetAttribute(dialogVBox, "NCGAP", "4x2");
     applyClumzyTheme(dialog);
     clumzyRefreshControlsEnabled(dialog);
+    IupSetAttribute(label1, "FGCOLOR", UI_TEXT);
     IupSetAttribute(statusLabel, "FGCOLOR", UI_TEXT_MUTE);
 
     // setup timer
@@ -1445,6 +1446,7 @@ static int uiOnDialogShow(Ihandle *ih, int state) {
     icon = (HICON)LoadImage(hInstance, "CLUMZY_ICON", IMAGE_ICON,
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)icon);
+    clumzyApplyWindowDarkMode(hWnd);
 
     exit = checkIsRunning();
     if (exit) {
