@@ -1,9 +1,7 @@
 """Build etc/clumzy-icon.ico plus the in-app logo C arrays.
 
-The Zub ZC mark is wider than it is tall and sits in a square PNG with a lot of
-empty margin. Crop the full mark (both letters), letterbox it into a square with
-a transparent surround, and write uncompressed ICO frames Windows can pick at
-title-bar / taskbar sizes.
+Use the original square PNG as-is. The only transform is a uniform scale
+so each frame fits its target size.
 """
 from __future__ import annotations
 
@@ -19,8 +17,8 @@ PREVIEW_DIR = ROOT / "dist"
 
 # Title bar / taskbar first. 256 last for Explorer.
 SIZES = (16, 20, 24, 32, 48, 64, 256)
-# Breathing room around the glow so the square does not clip the ZC.
-PAD_FRAC = 0.08
+LOGO_SIZE = 48
+APPICON_SIZE = 32
 
 
 def _load_png_rgba(path: Path) -> tuple[int, int, bytes]:
@@ -104,28 +102,6 @@ def _decode_png(data: bytes) -> tuple[int, int, bytes]:
     return width, height, bytes(out)
 
 
-def _bbox(w: int, h: int, rgba: bytes) -> tuple[int, int, int, int]:
-    """Bounds of the full ZC, including yellow glow that may have alpha 0."""
-    minx, miny, maxx, maxy = w, h, -1, -1
-    for y in range(h):
-        row = y * w * 4
-        for x in range(w):
-            i = row + x * 4
-            r, g, a = rgba[i], rgba[i + 1], rgba[i + 3]
-            if a > 16 or r > 24 or g > 20:
-                if x < minx:
-                    minx = x
-                if y < miny:
-                    miny = y
-                if x > maxx:
-                    maxx = x
-                if y > maxy:
-                    maxy = y
-    if maxx < 0:
-        return 0, 0, w, h
-    return minx, miny, maxx + 1, maxy + 1
-
-
 def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int, int, int]:
     if x < 0 or y < 0 or x >= sw or y >= sh:
         return (0, 0, 0, 0)
@@ -145,57 +121,35 @@ def _sample(src: bytes, sw: int, sh: int, x: float, y: float) -> tuple[int, int,
     return mix(mix(c00, c10, fx), mix(c01, c11, fx), fy)
 
 
-def _letterbox_square(w: int, h: int, rgba: bytes, size: int) -> bytes:
-    x0, y0, x1, y1 = _bbox(w, h, rgba)
-    bw, bh = max(1, x1 - x0), max(1, y1 - y0)
-    side = max(bw, bh) * (1.0 + 2.0 * PAD_FRAC)
-    cx = (x0 + x1) / 2.0
-    cy = (y0 + y1) / 2.0
-    left = cx - side / 2.0
-    top = cy - side / 2.0
+def _scale_to_fit(w: int, h: int, rgba: bytes, size: int) -> bytes:
+    """Uniform scale of the original image into a size x size square."""
     try:
         from PIL import Image
 
         src = Image.frombytes("RGBA", (w, h), rgba)
-        crop = (
-            int(round(left)),
-            int(round(top)),
-            int(round(left + side)),
-            int(round(top + side)),
-        )
-        master = Image.new("RGBA", (crop[2] - crop[0], crop[3] - crop[1]), (0, 0, 0, 0))
-        src_crop = src.crop(crop)
-        master.paste(src_crop, (0, 0))
-        resized = master.resize((size, size), Image.Resampling.LANCZOS)
-        out = bytearray(resized.tobytes())
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        scale = min(size / w, size / h)
+        nw = max(1, int(round(w * scale)))
+        nh = max(1, int(round(h * scale)))
+        resized = src.resize((nw, nh), Image.Resampling.LANCZOS)
+        canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2), resized)
+        return resized.tobytes() if nw == size and nh == size else canvas.tobytes()
     except ImportError:
-        out = bytearray(size * size * 4)
-        scale = side / float(size)
-        for y in range(size):
-            sy = top + (y + 0.5) * scale
-            for x in range(size):
-                sx = left + (x + 0.5) * scale
-                r, g, b, a = _sample(rgba, w, h, sx, sy)
-                i = (y * size + x) * 4
-                out[i : i + 4] = bytes((r, g, b, a))
-    return _restore_glow_alpha(bytes(out), size)
+        pass
 
-
-def _restore_glow_alpha(rgba: bytes, size: int) -> bytes:
-    """Keep the ZC glow, punch the surround to real transparency.
-
-    Source glow is often RGB with alpha 0. Empty / near-black padding must stay
-    0,0,0,0 so the title bar and taskbar do not paint a black square.
-    """
-    out = bytearray(rgba)
-    for i in range(size * size):
-        r, g, b, a = out[i * 4 : i * 4 + 4]
-        if a < 8 and (r > 16 or g > 12):
-            a = max(r, g, b)
-        if a < 16 and r < 20 and g < 16 and b < 16:
-            out[i * 4 : i * 4 + 4] = bytes((0, 0, 0, 0))
-        else:
-            out[i * 4 + 3] = a
+    scale = min(size / float(w), size / float(h))
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    ox = (size - nw) / 2.0
+    oy = (size - nh) / 2.0
+    out = bytearray(size * size * 4)
+    for y in range(size):
+        sy = (y - oy + 0.5) * (h / float(nh)) - 0.5
+        for x in range(size):
+            sx = (x - ox + 0.5) * (w / float(nw)) - 0.5
+            r, g, b, a = _sample(rgba, w, h, sx, sy)
+            i = (y * size + x) * 4
+            out[i : i + 4] = bytes((r, g, b, a))
     return bytes(out)
 
 
@@ -336,26 +290,26 @@ def main() -> int:
         print(f"missing {SRC}", file=sys.stderr)
         return 1
     w, h, rgba = _load_png_rgba(SRC)
-    frames = [(s, _letterbox_square(w, h, rgba, s)) for s in SIZES]
+    frames = [(s, _scale_to_fit(w, h, rgba, s)) for s in SIZES]
     _write_ico(OUT, frames)
-    app = next(px for s, px in frames if s == 32)
+    app = next(px for s, px in frames if s == APPICON_SIZE)
     _write_c_rgba(
         ROOT / "src" / "clumzy_appicon.c",
         "CLUMZY_APPICON_W",
         "CLUMZY_APPICON_H",
         "clumzy_appicon_rgba",
         "createClumzyAppIconImage",
-        32,
+        APPICON_SIZE,
         app,
     )
-    logo = _letterbox_square(w, h, rgba, 48)
+    logo = next(px for s, px in frames if s == LOGO_SIZE)
     _write_c_rgba(
         ROOT / "src" / "clumzy_logo.c",
         "CLUMZY_LOGO_W",
         "CLUMZY_LOGO_H",
         "clumzy_logo_rgba",
         "createClumzyLogoImage",
-        48,
+        LOGO_SIZE,
         logo,
     )
     PREVIEW_DIR.mkdir(exist_ok=True)
@@ -364,9 +318,11 @@ def main() -> int:
         _write_preview_png(
             PREVIEW_DIR / f"icon-preview-{s}-check.png", s, _on_checker(px, s)
         )
-    _write_preview_png(PREVIEW_DIR / "logo-preview-48.png", 48, logo)
+    _write_preview_png(PREVIEW_DIR / "logo-preview-48.png", LOGO_SIZE, logo)
     _write_preview_png(
-        PREVIEW_DIR / "logo-preview-48-check.png", 48, _on_checker(logo, 48)
+        PREVIEW_DIR / f"logo-preview-{LOGO_SIZE}-check.png",
+        LOGO_SIZE,
+        _on_checker(logo, LOGO_SIZE),
     )
     print(f"wrote {OUT} ({', '.join(str(s) for s, _ in frames)})")
     print("wrote src/clumzy_appicon.c")
