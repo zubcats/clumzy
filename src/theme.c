@@ -245,8 +245,6 @@ static void themeOne(Ihandle *ih) {
     if (strcmp(cls, "dialog") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
         IupSetAttribute(ih, "BACKGROUND", UI_BG);
-    } else if (strcmp(cls, "flatframe") == 0) {
-        styleFrame(ih);
     } else if (strcmp(cls, "flatbutton") == 0) {
         styleButton(ih);
         copyActionToFlat(ih);

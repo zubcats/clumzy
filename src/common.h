@@ -5,7 +5,6 @@
 #include "theme.h"
 #include "windivert.h"
 
-#define IupFrame(child) clumzyFrame(child)
 #define IupButton(title, action) clumzyButton(title)
 
 #define APP_NAME "Clumzy"
