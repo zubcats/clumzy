@@ -2,6 +2,7 @@
 #include <windows.h>
 #include "theme.h"
 
+#define CLUMZY_LABEL "__CLUMZY_LABEL"
 #define CLUMZY_FG "__CLUMZY_FG"
 
 typedef HRESULT (WINAPI *SetWindowTheme_t)(HWND, LPCWSTR, LPCWSTR);
@@ -54,23 +55,6 @@ static void stripVisualStyles(HWND hwnd) {
     }
 }
 
-/* Only the HWND of one edit/combo. Walking the dialog tree also hits
- * labels and checkboxes; untheming those paints them solid white. */
-static void skinEditHwnd(HWND hwnd) {
-    HWND child;
-    if (!hwnd) {
-        return;
-    }
-    allowDark(hwnd);
-    stripVisualStyles(hwnd);
-    child = FindWindowExA(hwnd, NULL, NULL, NULL);
-    while (child) {
-        allowDark(child);
-        stripVisualStyles(child);
-        child = FindWindowExA(hwnd, child, NULL, NULL);
-    }
-}
-
 static void styleFrame(Ihandle *frame) {
     IupSetAttribute(frame, "BGCOLOR", UI_BG);
     IupSetAttribute(frame, "TITLECOLOR", UI_ACCENT);
@@ -96,11 +80,8 @@ static void styleButton(Ihandle *btn) {
     IupSetAttribute(btn, "SHOWBORDER", "YES");
 }
 
-static void styleToggle(Ihandle *toggle, int enabled) {
-    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
-    IupSetAttribute(toggle, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    IupSetAttribute(toggle, "FLAT", "YES");
-    IupSetAttribute(toggle, "ACTIVE", "YES");
+static int isLabelButton(Ihandle *ih) {
+    return IupGetInt(ih, CLUMZY_LABEL);
 }
 
 static const char *labelFg(Ihandle *label, int enabled) {
@@ -111,10 +92,36 @@ static const char *labelFg(Ihandle *label, int enabled) {
     return enabled ? UI_ACCENT : UI_SAGE;
 }
 
-static void styleLabel(Ihandle *label, int enabled) {
+static void styleLabelButton(Ihandle *label, int enabled) {
+    const char *fg = labelFg(label, enabled);
+    IupSetAttribute(label, CLUMZY_LABEL, "1");
     IupSetAttribute(label, "BGCOLOR", UI_BG);
-    IupSetAttribute(label, "FGCOLOR", labelFg(label, enabled));
+    IupSetAttribute(label, "FGCOLOR", fg);
+    IupSetAttribute(label, "HLCOLOR", UI_BG);
+    IupSetAttribute(label, "PSCOLOR", UI_BG);
+    IupSetAttribute(label, "TEXTHLCOLOR", fg);
+    IupSetAttribute(label, "TEXTPSCOLOR", fg);
+    IupSetAttribute(label, "BORDERWIDTH", "0");
+    IupSetAttribute(label, "SHOWBORDER", "NO");
+    IupSetAttribute(label, "ALIGNMENT", "ALEFT:ACENTER");
+    IupSetAttribute(label, "CANFOCUS", "NO");
     IupSetAttribute(label, "ACTIVE", "YES");
+}
+
+/* System checkbox does not fill the canvas; CHECKSIZE=0 does. */
+static void styleToggle(Ihandle *toggle, int enabled) {
+    IupSetAttribute(toggle, "CHECKSIZE", "0");
+    IupSetAttribute(toggle, "BGCOLOR", UI_BG);
+    IupSetAttribute(toggle, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    IupSetAttribute(toggle, "HLCOLOR", UI_BG);
+    IupSetAttribute(toggle, "PSCOLOR", UI_BG);
+    IupSetAttribute(toggle, "TEXTHLCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    IupSetAttribute(toggle, "TEXTPSCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+    IupSetAttribute(toggle, "BORDERWIDTH", "0");
+    IupSetAttribute(toggle, "SHOWBORDER", "NO");
+    IupSetAttribute(toggle, "ALIGNMENT", "ALEFT:ACENTER");
+    IupSetAttribute(toggle, "EXPAND", "NO");
+    IupSetAttribute(toggle, "ACTIVE", "YES");
 }
 
 static void styleText(Ihandle *ih, int enabled) {
@@ -144,18 +151,19 @@ Ihandle *clumzyButton(const char *title) {
 }
 
 Ihandle *clumzyToggle(const char *title) {
-    Ihandle *toggle = IupToggle(title, NULL);
+    Ihandle *toggle = IupFlatToggle(title);
     styleToggle(toggle, 1);
     return toggle;
 }
 
 Ihandle *clumzyLabel(const char *title) {
-    Ihandle *label = IupLabel(title);
-    if (title) {
-        styleLabel(label, 1);
-    } else {
-        IupSetAttribute(label, "BGCOLOR", UI_BG);
+    Ihandle *label;
+    if (!title) {
+        label = IupLabel(NULL);
+        return label;
     }
+    label = IupFlatButton(title);
+    styleLabelButton(label, 1);
     return label;
 }
 
@@ -221,6 +229,7 @@ static int ancestorEnabled(Ihandle *ih) {
     return 1;
 }
 
+/* Untheme IupText only. ComboBoxes stay themed — untheming them is a white box. */
 static void skinAfterMap(Ihandle *ih) {
     const char *cls;
     HWND hwnd;
@@ -238,8 +247,9 @@ static void skinAfterMap(Ihandle *ih) {
         if (hwnd) {
             clumzyApplyWindowDarkMode(hwnd);
         }
-    } else if (cls && hwnd && (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0)) {
-        skinEditHwnd(hwnd);
+    } else if (cls && hwnd && strcmp(cls, "text") == 0) {
+        stripVisualStyles(hwnd);
+        allowDark(hwnd);
         styleText(ih, ancestorEnabled(ih));
         InvalidateRect(hwnd, NULL, TRUE);
     }
@@ -291,34 +301,27 @@ static void themeOne(Ihandle *ih) {
         return;
     }
 
-    if (strcmp(cls, "dialog") == 0 ||
-        strcmp(cls, "vbox") == 0 ||
-        strcmp(cls, "hbox") == 0 ||
-        strcmp(cls, "zbox") == 0 ||
-        strcmp(cls, "cbox") == 0 ||
-        strcmp(cls, "fill") == 0 ||
-        strcmp(cls, "flatframe") == 0) {
+    if (strcmp(cls, "dialog") == 0) {
         IupSetAttribute(ih, "BGCOLOR", UI_BG);
-        if (strcmp(cls, "dialog") == 0) {
-            IupSetAttribute(ih, "BACKGROUND", UI_BG);
-        }
-        if (strcmp(cls, "flatframe") == 0) {
-            styleFrame(ih);
-        }
+        IupSetAttribute(ih, "BACKGROUND", UI_BG);
+    } else if (strcmp(cls, "flatframe") == 0) {
+        styleFrame(ih);
     } else if (strcmp(cls, "label") == 0) {
-        if (IupGetAttribute(ih, "IMAGE")) {
-            IupSetAttribute(ih, "EXPAND", "NO");
-            IupSetAttribute(ih, "BGCOLOR", UI_BG);
-        } else {
-            styleLabel(ih, 1);
-        }
-    } else if (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0) {
+        IupSetAttribute(ih, "EXPAND", "NO");
+    } else if (strcmp(cls, "text") == 0) {
         styleText(ih, 1);
-    } else if (strcmp(cls, "toggle") == 0) {
+    } else if (strcmp(cls, "list") == 0) {
+        styleText(ih, 1);
+    } else if (strcmp(cls, "flattoggle") == 0) {
         styleToggle(ih, 1);
-    } else if (strcmp(cls, "flatbutton") == 0) {
-        styleButton(ih);
         copyActionToFlat(ih);
+    } else if (strcmp(cls, "flatbutton") == 0) {
+        if (isLabelButton(ih)) {
+            styleLabelButton(ih, 1);
+        } else {
+            styleButton(ih);
+            copyActionToFlat(ih);
+        }
     }
 }
 
@@ -357,17 +360,19 @@ static void enableOne(Ihandle *ih, int enabled) {
     if (!cls) {
         return;
     }
-    if (strcmp(cls, "text") == 0 || strcmp(cls, "list") == 0) {
+    if (strcmp(cls, "text") == 0) {
         IupSetAttribute(ih, "CANFOCUS", "YES");
         styleText(ih, enabled);
-    } else if (strcmp(cls, "toggle") == 0) {
+    } else if (strcmp(cls, "flattoggle") == 0) {
         styleToggle(ih, enabled);
     } else if (strcmp(cls, "flatbutton") == 0) {
-        styleButton(ih);
-        IupSetAttribute(ih, "ACTIVE", "YES");
-        IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
-    } else if (strcmp(cls, "label") == 0 && !IupGetAttribute(ih, "IMAGE")) {
-        styleLabel(ih, enabled);
+        if (isLabelButton(ih)) {
+            styleLabelButton(ih, enabled);
+        } else {
+            styleButton(ih);
+            IupSetAttribute(ih, "ACTIVE", "YES");
+            IupSetAttribute(ih, "FGCOLOR", enabled ? UI_TEXT : UI_TEXT_MUTE);
+        }
     }
 }
 
@@ -429,7 +434,8 @@ void clumzyLockText(Ihandle *ih, int locked) {
     }
     hwnd = (HWND)IupGetAttribute(ih, "HWND");
     if (hwnd) {
-        skinEditHwnd(hwnd);
+        stripVisualStyles(hwnd);
+        allowDark(hwnd);
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
