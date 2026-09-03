@@ -471,7 +471,7 @@ class ClumzyWindow(QMainWindow):
         self._repeat_active = False
         self._loading_settings = True
         self._worker = None
-        self.setWindowTitle('Clumzy 2.0')
+        self.setWindowTitle('Clumzy 2.0 | Zub Clan 2026 | Last Updated: 090326')
         self.setObjectName('clumzyMain')
         self.setWindowIcon(load_app_icon())
 
