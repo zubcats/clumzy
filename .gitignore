@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+settings.ini
 bin/
 build/
 dist/

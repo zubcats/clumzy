@@ -7,7 +7,7 @@ import os
 import sys
 from ctypes import c_char_p, c_float, c_int
 
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -345,6 +345,10 @@ def parse_config_filters(path: str) -> list[tuple[str, str]]:
     return filters
 
 
+def settings_path() -> str:
+    return os.path.join(app_dir(), 'settings.ini')
+
+
 def parse_presets(path: str) -> tuple[str, list[dict]]:
     parser = configparser.ConfigParser(interpolation=None)
     parser.optionxform = str
@@ -465,6 +469,7 @@ class ClumzyWindow(QMainWindow):
         self._hotkey_armed = False
         self._engine_busy = False
         self._repeat_active = False
+        self._loading_settings = True
         self._worker = None
         self.setWindowTitle('Clumzy 2.0')
         self.setObjectName('clumzyMain')
@@ -489,6 +494,7 @@ class ClumzyWindow(QMainWindow):
             self.filter_presets.addItem(name)
         self.filter_presets.currentIndexChanged.connect(self._on_filter_preset)
         self.filter_edit.textChanged.connect(self._on_filter_typed)
+        self.filter_edit.textChanged.connect(self.schedule_save)
 
         filter_box = QGroupBox('Filtering')
         filter_col = QVBoxLayout(filter_box)
@@ -529,6 +535,7 @@ class ClumzyWindow(QMainWindow):
         self.trigger = QComboBox()
         self.trigger.addItems(['Toggle', 'Timer'])
         self.trigger.currentTextChanged.connect(self._on_trigger)
+        self.trigger.currentTextChanged.connect(self.schedule_save)
         extra_row.addWidget(self.trigger)
         self.timer_label = QLabel('On (s):')
         self.timer_secs = QDoubleSpinBox()
@@ -537,7 +544,9 @@ class ClumzyWindow(QMainWindow):
         self.timer_secs.setRange(0.05, 120.0)
         self.timer_secs.setValue(1.00)
         self.timer_secs.setKeyboardTracking(False)
+        self.timer_secs.valueChanged.connect(self.schedule_save)
         self.repeat_chk = QCheckBox('Repeat')
+        self.repeat_chk.toggled.connect(self.schedule_save)
         extra_row.addWidget(self.timer_label)
         extra_row.addWidget(self.timer_secs)
         extra_row.addWidget(self.repeat_chk)
@@ -563,6 +572,10 @@ class ClumzyWindow(QMainWindow):
         self._sync.setSingleShot(True)
         self._sync.setInterval(80)
         self._sync.timeout.connect(self.push_engine)
+        self._save = QTimer(self)
+        self._save.setSingleShot(True)
+        self._save.setInterval(250)
+        self._save.timeout.connect(self.save_settings)
         self.key_timer = QTimer(self)
         self.key_timer.timeout.connect(self._poll_key)
         self.key_timer.start(30)
@@ -577,6 +590,13 @@ class ClumzyWindow(QMainWindow):
         for widget in self.findChildren(QComboBox):
             if widget not in skip:
                 widget.currentIndexChanged.connect(self.schedule_push)
+        self.network.currentIndexChanged.connect(self.schedule_save)
+        self.filter_presets.currentIndexChanged.connect(self.schedule_save)
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self)
+        self.load_settings()
+        self._loading_settings = False
         self.schedule_push()
 
     def _load_logo(self) -> None:
@@ -792,6 +812,201 @@ class ClumzyWindow(QMainWindow):
 
     def schedule_push(self) -> None:
         self._sync.start()
+        self.schedule_save()
+
+    def schedule_save(self) -> None:
+        if self._loading_settings:
+            return
+        self._save.start()
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() in (QEvent.KeyPress, QEvent.ShortcutOverride) and self.keybind:
+            text = event.text()
+            if text and text[:1].lower() == self.keybind[:1].lower():
+                focused = QApplication.focusWidget()
+                if isinstance(obj, (QComboBox, QSpinBox, QDoubleSpinBox)) or isinstance(
+                    focused, (QComboBox, QSpinBox, QDoubleSpinBox)
+                ):
+                    return True
+        return super().eventFilter(obj, event)
+
+    def load_settings(self) -> None:
+        path = settings_path()
+        if not os.path.isfile(path):
+            return
+        cfg = configparser.ConfigParser(interpolation=None)
+        cfg.optionxform = str
+        try:
+            cfg.read(path, encoding='utf-8')
+        except Exception:
+            return
+        if not cfg.has_section('Session'):
+            return
+        s = cfg['Session']
+        self._loading_settings = True
+        try:
+            mode = s.get('TriggerMode', 'Toggle')
+            idx = self.trigger.findText(mode)
+            if idx >= 0:
+                self.trigger.setCurrentIndex(idx)
+            self._on_trigger(self.trigger.currentText())
+            try:
+                self.timer_secs.setValue(float(s.get('TimerSeconds', '1') or 1))
+            except ValueError:
+                pass
+            self.repeat_chk.setChecked(parse_truth(s.get('Repeat', 'false')))
+            try:
+                net = int(s.get('Network', '2') or 2)
+                pos = self.network.findData(net)
+                if pos >= 0:
+                    self.network.setCurrentIndex(pos)
+            except ValueError:
+                pass
+            filt = s.get('Filter', '')
+            if filt:
+                self.filter_edit.blockSignals(True)
+                self.filter_edit.setText(filt)
+                self.filter_edit.blockSignals(False)
+            try:
+                fp = int(s.get('FilterPreset', '-1') or -1)
+                if 0 <= fp < self.filter_presets.count():
+                    self.filter_presets.blockSignals(True)
+                    self.filter_presets.setCurrentIndex(fp)
+                    self.filter_presets.blockSignals(False)
+            except ValueError:
+                pass
+            try:
+                gp = int(s.get('FunctionPreset', '0') or 0)
+                if 0 <= gp < self.func_presets.count():
+                    self.func_presets.blockSignals(True)
+                    self.func_presets.setCurrentIndex(gp)
+                    self.func_presets.blockSignals(False)
+            except ValueError:
+                pass
+            self._apply_saved_modules(s)
+        finally:
+            self._loading_settings = False
+
+    def _apply_saved_modules(self, s: configparser.SectionProxy) -> None:
+        def _bool(key: str, default: bool) -> bool:
+            if key not in s:
+                return default
+            return parse_truth(s.get(key, str(default)))
+
+        def _float(key: str, default: float) -> float:
+            try:
+                return float(s.get(key, str(default)) or default)
+            except ValueError:
+                return default
+
+        def _int(key: str, default: int) -> int:
+            try:
+                return int(float(s.get(key, str(default)) or default))
+            except ValueError:
+                return default
+
+        self.lag_row.enabled.setChecked(_bool('LagEnabled', False))
+        self.lag_in.setChecked(_bool('LagInbound', True))
+        self.lag_out.setChecked(_bool('LagOutbound', True))
+        self.lag_ms.setValue(_int('LagMs', 170))
+        self.drop_row.enabled.setChecked(_bool('DropEnabled', False))
+        self.drop_in.setChecked(_bool('DropInbound', True))
+        self.drop_out.setChecked(_bool('DropOutbound', True))
+        self.drop_chance.setValue(_float('DropChance', 87.0))
+        self.disc_row.enabled.setChecked(_bool('DisconnectEnabled', False))
+        self.disc_in.setChecked(_bool('DisconnectInbound', True))
+        self.disc_out.setChecked(_bool('DisconnectOutbound', True))
+        self.bw_row.enabled.setChecked(_bool('BandwidthEnabled', False))
+        self.bw_in.setChecked(_bool('BandwidthInbound', True))
+        self.bw_out.setChecked(_bool('BandwidthOutbound', True))
+        self.bw_queue.setValue(_int('BandwidthQueue', 100))
+        self.bw_limit.setValue(_int('BandwidthLimit', 100))
+        self.bw_unit.setCurrentIndex(0 if _bool('BandwidthKB', True) else 1)
+        self.th_row.enabled.setChecked(_bool('ThrottleEnabled', False))
+        self.th_drop.setChecked(_bool('ThrottleDrop', False))
+        self.th_in.setChecked(_bool('ThrottleInbound', True))
+        self.th_out.setChecked(_bool('ThrottleOutbound', True))
+        self.th_frame.setValue(_int('ThrottleFrame', 30))
+        self.th_chance.setValue(_float('ThrottleChance', 10.0))
+        self.dup_row.enabled.setChecked(_bool('DuplicateEnabled', False))
+        self.dup_in.setChecked(_bool('DuplicateInbound', True))
+        self.dup_out.setChecked(_bool('DuplicateOutbound', True))
+        self.dup_count.setValue(_int('DuplicateCount', 2))
+        self.dup_chance.setValue(_float('DuplicateChance', 10.0))
+        self.ood_row.enabled.setChecked(_bool('OodEnabled', False))
+        self.ood_in.setChecked(_bool('OodInbound', True))
+        self.ood_out.setChecked(_bool('OodOutbound', True))
+        self.ood_chance.setValue(_float('OodChance', 10.0))
+        self.tam_row.enabled.setChecked(_bool('TamperEnabled', False))
+        self.tam_sum.setChecked(_bool('TamperChecksum', True))
+        self.tam_in.setChecked(_bool('TamperInbound', True))
+        self.tam_out.setChecked(_bool('TamperOutbound', True))
+        self.tam_chance.setValue(_float('TamperChance', 10.0))
+        self.rst_row.enabled.setChecked(_bool('ResetEnabled', False))
+        self.rst_in.setChecked(_bool('ResetInbound', True))
+        self.rst_out.setChecked(_bool('ResetOutbound', True))
+        self.rst_chance.setValue(_float('ResetChance', 0.0))
+
+    def save_settings(self) -> None:
+        if self._loading_settings:
+            return
+        cfg = configparser.ConfigParser(interpolation=None)
+        cfg.optionxform = str
+        cfg['Session'] = {
+            'TriggerMode': self.trigger.currentText(),
+            'TimerSeconds': f'{self.timer_secs.value():.2f}',
+            'Repeat': 'true' if self.repeat_chk.isChecked() else 'false',
+            'Network': str(int(self.network.currentData() or 2)),
+            'Filter': self.filter_edit.text(),
+            'FilterPreset': str(self.filter_presets.currentIndex()),
+            'FunctionPreset': str(self.func_presets.currentIndex()),
+            'LagEnabled': str(self.lag_row.enabled.isChecked()).lower(),
+            'LagInbound': str(self.lag_in.isChecked()).lower(),
+            'LagOutbound': str(self.lag_out.isChecked()).lower(),
+            'LagMs': str(self.lag_ms.value()),
+            'DropEnabled': str(self.drop_row.enabled.isChecked()).lower(),
+            'DropInbound': str(self.drop_in.isChecked()).lower(),
+            'DropOutbound': str(self.drop_out.isChecked()).lower(),
+            'DropChance': str(self.drop_chance.value()),
+            'DisconnectEnabled': str(self.disc_row.enabled.isChecked()).lower(),
+            'DisconnectInbound': str(self.disc_in.isChecked()).lower(),
+            'DisconnectOutbound': str(self.disc_out.isChecked()).lower(),
+            'BandwidthEnabled': str(self.bw_row.enabled.isChecked()).lower(),
+            'BandwidthInbound': str(self.bw_in.isChecked()).lower(),
+            'BandwidthOutbound': str(self.bw_out.isChecked()).lower(),
+            'BandwidthQueue': str(self.bw_queue.value()),
+            'BandwidthLimit': str(self.bw_limit.value()),
+            'BandwidthKB': str(bool(self.bw_unit.currentData())).lower(),
+            'ThrottleEnabled': str(self.th_row.enabled.isChecked()).lower(),
+            'ThrottleDrop': str(self.th_drop.isChecked()).lower(),
+            'ThrottleInbound': str(self.th_in.isChecked()).lower(),
+            'ThrottleOutbound': str(self.th_out.isChecked()).lower(),
+            'ThrottleFrame': str(self.th_frame.value()),
+            'ThrottleChance': str(self.th_chance.value()),
+            'DuplicateEnabled': str(self.dup_row.enabled.isChecked()).lower(),
+            'DuplicateInbound': str(self.dup_in.isChecked()).lower(),
+            'DuplicateOutbound': str(self.dup_out.isChecked()).lower(),
+            'DuplicateCount': str(self.dup_count.value()),
+            'DuplicateChance': str(self.dup_chance.value()),
+            'OodEnabled': str(self.ood_row.enabled.isChecked()).lower(),
+            'OodInbound': str(self.ood_in.isChecked()).lower(),
+            'OodOutbound': str(self.ood_out.isChecked()).lower(),
+            'OodChance': str(self.ood_chance.value()),
+            'TamperEnabled': str(self.tam_row.enabled.isChecked()).lower(),
+            'TamperChecksum': str(self.tam_sum.isChecked()).lower(),
+            'TamperInbound': str(self.tam_in.isChecked()).lower(),
+            'TamperOutbound': str(self.tam_out.isChecked()).lower(),
+            'TamperChance': str(self.tam_chance.value()),
+            'ResetEnabled': str(self.rst_row.enabled.isChecked()).lower(),
+            'ResetInbound': str(self.rst_in.isChecked()).lower(),
+            'ResetOutbound': str(self.rst_out.isChecked()).lower(),
+            'ResetChance': str(self.rst_chance.value()),
+        }
+        try:
+            with open(settings_path(), 'w', encoding='utf-8') as handle:
+                cfg.write(handle)
+        except OSError:
+            pass
 
     def _arm_hotkey(self) -> None:
         self._hotkey_armed = True
@@ -965,6 +1180,7 @@ class ClumzyWindow(QMainWindow):
         self.auto_stop.stop()
         self._hotkey_armed = False
         self._repeat_active = False
+        self.save_settings()
         if self.running:
             try:
                 self.engine.stop()
