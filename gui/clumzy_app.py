@@ -464,6 +464,7 @@ class ClumzyWindow(QMainWindow):
         self._key_down = False
         self._hotkey_armed = False
         self._engine_busy = False
+        self._repeat_active = False
         self._worker = None
         self.setWindowTitle('Clumzy 2.0')
         self.setObjectName('clumzyMain')
@@ -529,14 +530,20 @@ class ClumzyWindow(QMainWindow):
         self.trigger.addItems(['Toggle', 'Timer'])
         self.trigger.currentTextChanged.connect(self._on_trigger)
         extra_row.addWidget(self.trigger)
-        self.timer_label = QLabel('Timer:')
-        self.timer_secs = QComboBox()
-        for seconds in range(1, 61):
-            self.timer_secs.addItem(str(seconds))
+        self.timer_label = QLabel('On (s):')
+        self.timer_secs = QDoubleSpinBox()
+        self.timer_secs.setDecimals(2)
+        self.timer_secs.setSingleStep(0.1)
+        self.timer_secs.setRange(0.05, 120.0)
+        self.timer_secs.setValue(1.00)
+        self.timer_secs.setKeyboardTracking(False)
+        self.repeat_chk = QCheckBox('Repeat')
         extra_row.addWidget(self.timer_label)
         extra_row.addWidget(self.timer_secs)
+        extra_row.addWidget(self.repeat_chk)
         self.timer_label.hide()
         self.timer_secs.hide()
+        self.repeat_chk.hide()
         outer.addWidget(extra_box)
 
         functions = QGroupBox('Functions')
@@ -551,7 +558,7 @@ class ClumzyWindow(QMainWindow):
 
         self.auto_stop = QTimer(self)
         self.auto_stop.setSingleShot(True)
-        self.auto_stop.timeout.connect(self.stop_filter)
+        self.auto_stop.timeout.connect(self._on_timer_elapsed)
         self._sync = QTimer(self)
         self._sync.setSingleShot(True)
         self._sync.setInterval(80)
@@ -561,11 +568,12 @@ class ClumzyWindow(QMainWindow):
         self.key_timer.start(30)
         QTimer.singleShot(1000, self._arm_hotkey)
 
-        skip = {self.filter_edit, self.filter_presets, self.func_presets, self.trigger}
+        skip = {self.filter_edit, self.filter_presets, self.func_presets, self.trigger, self.timer_secs}
         for widget in self.findChildren(QCheckBox):
             widget.toggled.connect(self.schedule_push)
         for widget in self.findChildren(QSpinBox) + self.findChildren(QDoubleSpinBox):
-            widget.valueChanged.connect(self.schedule_push)
+            if widget not in skip:
+                widget.valueChanged.connect(self.schedule_push)
         for widget in self.findChildren(QComboBox):
             if widget not in skip:
                 widget.currentIndexChanged.connect(self.schedule_push)
@@ -732,6 +740,16 @@ class ClumzyWindow(QMainWindow):
         timed = text == 'Timer'
         self.timer_label.setVisible(timed)
         self.timer_secs.setVisible(timed)
+        self.repeat_chk.setVisible(timed)
+
+    def _timer_ms(self) -> int:
+        return max(50, int(round(self.timer_secs.value() * 1000.0)))
+
+    def _timer_status(self) -> str:
+        secs = self.timer_secs.value()
+        if self._repeat_active:
+            return f'Repeat timer {secs:g}s on — Stop ends the cycle.'
+        return f'Timer {secs:g}s, then stop.'
 
     def _on_func_preset(self, index: int) -> None:
         if index <= 0 or index > len(self.presets):
@@ -813,7 +831,7 @@ class ClumzyWindow(QMainWindow):
         e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
 
     def toggle_filter(self) -> None:
-        if self.running:
+        if self.running or self._repeat_active or self._engine_busy:
             self.stop_filter()
         else:
             self.start_filter()
@@ -821,6 +839,9 @@ class ClumzyWindow(QMainWindow):
     def start_filter(self) -> None:
         if self._engine_busy:
             return
+        self._repeat_active = (
+            self.trigger.currentText() == 'Timer' and self.repeat_chk.isChecked()
+        )
         self.push_engine()
         filt = self.filter_edit.text().strip() or 'true'
         self._engine_busy = True
@@ -837,22 +858,73 @@ class ClumzyWindow(QMainWindow):
             self._worker.deleteLater()
             self._worker = None
         if error:
+            self._repeat_active = False
             self.status.setText(error)
             return
         self.running = True
         self.start_btn.setText('Stop')
         self.filter_edit.setEnabled(False)
-        self.status.setText('Started filtering. Enable functionalities to take effect.')
         if self.trigger.currentText() == 'Timer':
-            self.auto_stop.start(int(self.timer_secs.currentText()) * 1000)
+            self.auto_stop.start(self._timer_ms())
+            self.status.setText(self._timer_status())
+        else:
+            self.status.setText('Started filtering. Enable functionalities to take effect.')
+
+    def _on_timer_elapsed(self) -> None:
+        if self._repeat_active:
+            self._cycle_filter()
+        else:
+            self.stop_filter()
+
+    def _cycle_filter(self) -> None:
+        if self._engine_busy or not self._repeat_active:
+            return
+        filt = self.filter_edit.text().strip() or 'true'
+        self._engine_busy = True
+        self.status.setText('Cycling off/on…')
+
+        def work() -> str:
+            self.engine.stop()
+            if not self._repeat_active:
+                return 'stopped'
+            return self.engine.start(filt) or ''
+
+        self._worker = EngineCallThread(work)
+        self._worker.finished_ok.connect(self._on_cycled)
+        self._worker.start()
+
+    def _on_cycled(self, error: str) -> None:
+        self._engine_busy = False
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
+        if error == 'stopped' or not self._repeat_active:
+            if error not in ('', 'stopped'):
+                try:
+                    self.engine.stop()
+                except Exception:
+                    pass
+            self._finish_stopped()
+            return
+        if error:
+            self._repeat_active = False
+            self._finish_stopped()
+            self.status.setText(error)
+            return
+        self.running = True
+        self.start_btn.setText('Stop')
+        self.start_btn.setEnabled(True)
+        self.filter_edit.setEnabled(False)
+        self.auto_stop.start(self._timer_ms())
+        self.status.setText(self._timer_status())
 
     def stop_filter(self) -> None:
         self.auto_stop.stop()
+        self._repeat_active = False
         if self._engine_busy:
             return
         if not self.running:
-            self.start_btn.setText('Start')
-            self.filter_edit.setEnabled(True)
+            self._finish_stopped()
             return
         self._engine_busy = True
         self.start_btn.setEnabled(False)
@@ -866,14 +938,18 @@ class ClumzyWindow(QMainWindow):
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
+        self._finish_stopped()
+
+    def _finish_stopped(self) -> None:
         self.running = False
+        self._repeat_active = False
         self.start_btn.setText('Start')
         self.start_btn.setEnabled(True)
         self.filter_edit.setEnabled(True)
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
     def _poll_key(self) -> None:
-        if not self._hotkey_armed or not self.keybind or self._engine_busy:
+        if not self._hotkey_armed or not self.keybind:
             return
         scan = ctypes.windll.user32.VkKeyScanW(ord(self.keybind[0]))
         if scan == -1:
@@ -886,7 +962,9 @@ class ClumzyWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.key_timer.stop()
+        self.auto_stop.stop()
         self._hotkey_armed = False
+        self._repeat_active = False
         if self.running:
             try:
                 self.engine.stop()
