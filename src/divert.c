@@ -170,13 +170,12 @@ int divertStart(const char *filter, char buf[]) {
     if (clockThread == NULL) {
         sprintf(buf, "Failed to create clock loop thread (%lu)", GetLastError());
         InterlockedExchange16(&stopLooping, 1);
-        WinDivertShutdown(divertHandle, WINDIVERT_SHUTDOWN_RECV);
-        WaitForSingleObject(loopThread, 8000);
+        WinDivertClose(divertHandle);
+        WaitForSingleObject(loopThread, INFINITE);
         CloseHandle(loopThread);
         loopThread = NULL;
-        WinDivertClose(divertHandle);
-        CloseHandle(mutex);
         divertHandle = NULL;
+        CloseHandle(mutex);
         mutex = NULL;
         LeaveCriticalSection(&divertOpLock);
         return FALSE;
@@ -337,6 +336,7 @@ static DWORD divertClockLoop(LPVOID arg) {
         // need to get the lock here
         if (stopLooping) {
             int lastSendCount = 0;
+            BOOL closed;
 
             waitResult = WaitForSingleObject(mutex, INFINITE);
             switch (waitResult)
@@ -350,19 +350,23 @@ static DWORD divertClockLoop(LPVOID arg) {
                 // clean up by closing all modules
                 for (ix = 0; ix < MODULE_CNT; ++ix) {
                     Module *module = modules[ix];
-                    if (module->lastEnabled || *(module->enabledFlag)) {
+                    if (*(module->enabledFlag)) {
                         module->closeDown(head, tail);
-                        module->lastEnabled = 0;
                     }
                 }
                 LOG("Send all packets upon closing");
                 lastSendCount = sendAllListPackets();
-                LOG("Lastly sent %d packets. Recv is shut down by divertStop.", lastSendCount);
+                LOG("Lastly sent %d packets. Closing...", lastSendCount);
 
-                // release to let read loop exit properly
+                // Kali/clumsy: recv unblocks because THIS thread closes the handle
+                closed = WinDivertClose(divertHandle);
+                divertHandle = NULL;
+                if (!closed) {
+                    LOG("WinDivertClose failed (%lu)", GetLastError());
+                }
+
                 /***************** leave critical region ************************/
-                if ((waitResult == WAIT_OBJECT_0 || waitResult == WAIT_ABANDONED) &&
-                    mutex && !ReleaseMutex(mutex)) {
+                if (!ReleaseMutex(mutex)) {
                     LOG("Fatal: Failed to release mutex (%lu)", GetLastError());
                     ABORT();
                 }
@@ -383,19 +387,11 @@ static DWORD divertReadLoop(LPVOID arg) {
     UNREFERENCED_PARAMETER(arg);
 
     for(;;) {
-        if (stopLooping) {
-            LOG("stopLooping before recv. Exit loop.");
-            return 0;
-        }
-        // each step must fully consume the list
         assert(isListEmpty()); // FIXME has failed this assert before. don't know why
         if (!WinDivertRecv(divertHandle, packetBuf, MAX_PACKETSIZE, &readLen, &addrBuf)) {
             DWORD lastError = GetLastError();
-            if (stopLooping ||
-                lastError == ERROR_INVALID_HANDLE ||
-                lastError == ERROR_OPERATION_ABORTED ||
-                lastError == ERROR_NO_DATA) {
-                LOG("Recv ended (%lu). Exit loop.", lastError);
+            if (lastError == ERROR_INVALID_HANDLE || lastError == ERROR_OPERATION_ABORTED) {
+                LOG("Handle died or operation aborted. Exit loop.");
                 return 0;
             }
             LOG("Failed to recv a packet. (%lu)", lastError);
@@ -447,20 +443,14 @@ static DWORD divertReadLoop(LPVOID arg) {
 static void divertStopUnlocked(void) {
     HANDLE threads[2];
     int n = 0;
-    DWORD waitResult = WAIT_OBJECT_0;
-    int threadsExited = 1;
 
-    if (!loopThread && !clockThread && !divertHandleLive()) {
+    if (!loopThread && !clockThread) {
         drainPacketNodeList();
         return;
     }
 
     LOG("Stopping...");
     InterlockedExchange16(&stopLooping, 1);
-
-    if (divertHandleLive()) {
-        WinDivertShutdown(divertHandle, WINDIVERT_SHUTDOWN_RECV);
-    }
 
     if (loopThread) {
         threads[n++] = loopThread;
@@ -469,40 +459,24 @@ static void divertStopUnlocked(void) {
         threads[n++] = clockThread;
     }
     if (n > 0) {
-        waitResult = WaitForMultipleObjects((DWORD)n, threads, TRUE, 8000);
-        if (waitResult == WAIT_TIMEOUT) {
-            LOG("Threads did not exit in time; closing divert handle.");
-            if (divertHandleLive()) {
-                WinDivertClose(divertHandle);
-                divertHandle = NULL;
-            }
-            waitResult = WaitForMultipleObjects((DWORD)n, threads, TRUE, 3000);
-        }
-        threadsExited = (waitResult != WAIT_TIMEOUT);
+        WaitForMultipleObjects((DWORD)n, threads, TRUE, INFINITE);
     }
 
-    if (threadsExited) {
-        if (loopThread) {
-            CloseHandle(loopThread);
-            loopThread = NULL;
-        }
-        if (clockThread) {
-            CloseHandle(clockThread);
-            clockThread = NULL;
-        }
-        if (mutex) {
-            CloseHandle(mutex);
-            mutex = NULL;
-        }
-        drainPacketNodeList();
-        InterlockedExchange16(&stopLooping, 0);
+    if (loopThread) {
+        CloseHandle(loopThread);
+        loopThread = NULL;
     }
-
-    if (divertHandleLive()) {
-        WinDivertClose(divertHandle);
-        divertHandle = NULL;
+    if (clockThread) {
+        CloseHandle(clockThread);
+        clockThread = NULL;
     }
-
+    if (mutex) {
+        CloseHandle(mutex);
+        mutex = NULL;
+    }
+    divertHandle = NULL;
+    drainPacketNodeList();
+    InterlockedExchange16(&stopLooping, 0);
     LOG("Successfully waited threads and stopped.");
 }
 
