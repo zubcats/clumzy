@@ -2,6 +2,7 @@
 #include <memory.h>
 #include <winsock2.h>
 #include <Ws2tcpip.h>
+#include <windows.h>
 #include "windivert.h"
 #include "common.h"
 #define DIVERT_PRIORITY 0
@@ -14,9 +15,29 @@
 
 
 
-static HANDLE divertHandle;
-static volatile short stopLooping;
-static HANDLE loopThread, clockThread, mutex;
+static HANDLE divertHandle = NULL;
+static volatile short stopLooping = 0;
+static HANDLE loopThread = NULL, clockThread = NULL, mutex = NULL;
+static CRITICAL_SECTION divertOpLock;
+static volatile LONG divertOpLockState = 0;
+
+static void divertEnsureLock(void) {
+    LONG prev = InterlockedCompareExchange(&divertOpLockState, 1, 0);
+    if (prev == 0) {
+        InitializeCriticalSection(&divertOpLock);
+        InterlockedExchange(&divertOpLockState, 2);
+    } else {
+        while (InterlockedCompareExchange(&divertOpLockState, 2, 2) != 2) {
+            Sleep(0);
+        }
+    }
+}
+
+static int divertHandleLive(void) {
+    return divertHandle != NULL && divertHandle != INVALID_HANDLE_VALUE;
+}
+
+static void divertStopUnlocked(void);
 
 static DWORD divertReadLoop(LPVOID arg);
 static DWORD divertClockLoop(LPVOID arg);
@@ -81,6 +102,13 @@ void dumpPacket(char *buf, int len, PWINDIVERT_ADDRESS paddr) {
 
 int divertStart(const char *filter, char buf[]) {
     int ix;
+    divertEnsureLock();
+    EnterCriticalSection(&divertOpLock);
+
+    if (loopThread || clockThread || divertHandleLive()) {
+        divertStopUnlocked();
+    }
+
     //WINDIVERT_LAYER_NETWORK_FORWARD
     if (NetworkType == 1) {
         divertHandle = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, DIVERT_PRIORITY, 0);
@@ -91,12 +119,14 @@ int divertStart(const char *filter, char buf[]) {
    
     if (divertHandle == INVALID_HANDLE_VALUE) {
         DWORD lastError = GetLastError();
+        divertHandle = NULL;
         if (lastError == ERROR_INVALID_PARAMETER) {
             strcpy(buf, "Failed to start filtering : filter syntax error.");
         } else {
             sprintf(buf, "Failed to start filtering : failed to open device (code:%lu).\n"
                 "Make sure you run " APP_NAME " as Administrator.", lastError);
         }
+        LeaveCriticalSection(&divertOpLock);
         return FALSE;
     }
     LOG("Divert opened handle.");
@@ -115,26 +145,44 @@ int divertStart(const char *filter, char buf[]) {
 
     // kick off the loop
     LOG("Creating threads and mutex...");
-    stopLooping = FALSE;
+    InterlockedExchange16(&stopLooping, 0);
     mutex = CreateMutex(NULL, FALSE, NULL);
     if (mutex == NULL) {
         sprintf(buf, "Failed to create mutex (%lu)", GetLastError());
+        WinDivertClose(divertHandle);
+        divertHandle = NULL;
+        LeaveCriticalSection(&divertOpLock);
         return FALSE;
     }
 
-    loopThread = CreateThread(NULL, 1, (LPTHREAD_START_ROUTINE)divertReadLoop, NULL, 0, NULL);
+    loopThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)divertReadLoop, NULL, 0, NULL);
     if (loopThread == NULL) {
         sprintf(buf, "Failed to create recv loop thread (%lu)", GetLastError());
+        WinDivertClose(divertHandle);
+        CloseHandle(mutex);
+        divertHandle = NULL;
+        mutex = NULL;
+        LeaveCriticalSection(&divertOpLock);
         return FALSE;
     }
-    clockThread = CreateThread(NULL, 1, (LPTHREAD_START_ROUTINE)divertClockLoop, NULL, 0, NULL);
+    clockThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)divertClockLoop, NULL, 0, NULL);
     if (clockThread == NULL) {
         sprintf(buf, "Failed to create clock loop thread (%lu)", GetLastError());
+        InterlockedExchange16(&stopLooping, 1);
+        WinDivertShutdown(divertHandle, WINDIVERT_SHUTDOWN_RECV);
+        WaitForSingleObject(loopThread, 8000);
+        CloseHandle(loopThread);
+        loopThread = NULL;
+        WinDivertClose(divertHandle);
+        CloseHandle(mutex);
+        divertHandle = NULL;
+        mutex = NULL;
+        LeaveCriticalSection(&divertOpLock);
         return FALSE;
     }
 
     LOG("Threads created");
-
+    LeaveCriticalSection(&divertOpLock);
     return TRUE;
 }
 
@@ -288,7 +336,6 @@ static DWORD divertClockLoop(LPVOID arg) {
         // need to get the lock here
         if (stopLooping) {
             int lastSendCount = 0;
-            BOOL closed;
 
             waitResult = WaitForSingleObject(mutex, INFINITE);
             switch (waitResult)
@@ -302,21 +349,19 @@ static DWORD divertClockLoop(LPVOID arg) {
                 // clean up by closing all modules
                 for (ix = 0; ix < MODULE_CNT; ++ix) {
                     Module *module = modules[ix];
-                    if (*(module->enabledFlag)) {
+                    if (module->lastEnabled || *(module->enabledFlag)) {
                         module->closeDown(head, tail);
-                    } 
+                        module->lastEnabled = 0;
+                    }
                 }
                 LOG("Send all packets upon closing");
                 lastSendCount = sendAllListPackets();
-                LOG("Lastly sent %d packets. Closing...", lastSendCount);
-
-                // terminate recv loop by closing handler. handle related error in recv loop to quit
-                closed = WinDivertClose(divertHandle);
-                assert(closed);
+                LOG("Lastly sent %d packets. Recv is shut down by divertStop.", lastSendCount);
 
                 // release to let read loop exit properly
                 /***************** leave critical region ************************/
-                if (!ReleaseMutex(mutex)) {
+                if ((waitResult == WAIT_OBJECT_0 || waitResult == WAIT_ABANDONED) &&
+                    mutex && !ReleaseMutex(mutex)) {
                     LOG("Fatal: Failed to release mutex (%lu)", GetLastError());
                     ABORT();
                 }
@@ -337,16 +382,22 @@ static DWORD divertReadLoop(LPVOID arg) {
     UNREFERENCED_PARAMETER(arg);
 
     for(;;) {
+        if (stopLooping) {
+            LOG("stopLooping before recv. Exit loop.");
+            return 0;
+        }
         // each step must fully consume the list
         assert(isListEmpty()); // FIXME has failed this assert before. don't know why
         if (!WinDivertRecv(divertHandle, packetBuf, MAX_PACKETSIZE, &readLen, &addrBuf)) {
             DWORD lastError = GetLastError();
-            if (lastError == ERROR_INVALID_HANDLE || lastError == ERROR_OPERATION_ABORTED) {
-                // treat closing handle as quit
-                LOG("Handle died or operation aborted. Exit loop.");
+            if (stopLooping ||
+                lastError == ERROR_INVALID_HANDLE ||
+                lastError == ERROR_OPERATION_ABORTED ||
+                lastError == ERROR_NO_DATA) {
+                LOG("Recv ended (%lu). Exit loop.", lastError);
                 return 0;
             }
-            LOG("Failed to recv a packet. (%lu)", GetLastError());
+            LOG("Failed to recv a packet. (%lu)", lastError);
             continue;
         }
         if (readLen > MAX_PACKETSIZE) {
@@ -392,14 +443,71 @@ static DWORD divertReadLoop(LPVOID arg) {
     }
 }
 
-void divertStop() {
+static void divertStopUnlocked(void) {
     HANDLE threads[2];
-    threads[0] = loopThread;
-    threads[1] = clockThread;
+    int n = 0;
+    DWORD waitResult = WAIT_OBJECT_0;
+    int threadsExited = 1;
+
+    if (!loopThread && !clockThread && !divertHandleLive()) {
+        drainPacketNodeList();
+        return;
+    }
 
     LOG("Stopping...");
-    InterlockedIncrement16(&stopLooping);
-    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+    InterlockedExchange16(&stopLooping, 1);
+
+    if (divertHandleLive()) {
+        WinDivertShutdown(divertHandle, WINDIVERT_SHUTDOWN_RECV);
+    }
+
+    if (loopThread) {
+        threads[n++] = loopThread;
+    }
+    if (clockThread) {
+        threads[n++] = clockThread;
+    }
+    if (n > 0) {
+        waitResult = WaitForMultipleObjects((DWORD)n, threads, TRUE, 8000);
+        if (waitResult == WAIT_TIMEOUT) {
+            LOG("Threads did not exit in time; closing divert handle.");
+            if (divertHandleLive()) {
+                WinDivertClose(divertHandle);
+                divertHandle = NULL;
+            }
+            waitResult = WaitForMultipleObjects((DWORD)n, threads, TRUE, 3000);
+        }
+        threadsExited = (waitResult != WAIT_TIMEOUT);
+    }
+
+    if (threadsExited) {
+        if (loopThread) {
+            CloseHandle(loopThread);
+            loopThread = NULL;
+        }
+        if (clockThread) {
+            CloseHandle(clockThread);
+            clockThread = NULL;
+        }
+        if (mutex) {
+            CloseHandle(mutex);
+            mutex = NULL;
+        }
+        drainPacketNodeList();
+        InterlockedExchange16(&stopLooping, 0);
+    }
+
+    if (divertHandleLive()) {
+        WinDivertClose(divertHandle);
+        divertHandle = NULL;
+    }
 
     LOG("Successfully waited threads and stopped.");
+}
+
+void divertStop() {
+    divertEnsureLock();
+    EnterCriticalSection(&divertOpLock);
+    divertStopUnlocked();
+    LeaveCriticalSection(&divertOpLock);
 }

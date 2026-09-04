@@ -39,6 +39,10 @@ int clumzy_start(const char *filter, char *err, int errlen) {
     if (!filter) {
         filter = "true";
     }
+    if (g_running) {
+        divertStop();
+        g_running = 0;
+    }
     if (divertStart(filter, buf) == 0) {
         if (err && errlen > 0) {
             strncpy(err, buf, (size_t)errlen - 1);
@@ -56,9 +60,7 @@ int clumzy_start(const char *filter, char *err, int errlen) {
 
 void clumzy_stop(void) {
     int ix;
-    if (g_running) {
-        divertStop();
-    }
+    divertStop();
     g_running = 0;
     sendState = SEND_STATUS_NONE;
     for (ix = 0; ix < MODULE_CNT; ++ix) {

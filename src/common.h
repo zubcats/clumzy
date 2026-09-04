@@ -109,6 +109,7 @@ typedef struct _NODE {
 } PacketNode;
 
 void initPacketNodeList();
+void drainPacketNodeList();
 PacketNode* createNode(char* buf, UINT len, WINDIVERT_ADDRESS *addr);
 void freeNode(PacketNode *node);
 PacketNode* popNode(PacketNode *node);

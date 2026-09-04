@@ -5,6 +5,7 @@ import configparser
 import ctypes
 import os
 import sys
+import threading
 from ctypes import c_char_p, c_float, c_int
 
 from PyQt5.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
@@ -388,17 +389,20 @@ class Engine:
         self.dll.clumzy_tamper.argtypes = [c_int, c_int, c_float, c_int]
         self.dll.clumzy_reset.argtypes = [c_int, c_int, c_float]
         self.dll.clumzy_reset_next.argtypes = []
+        self._lock = threading.Lock()
         if self.dll.clumzy_engine_init() == 0:
             raise RuntimeError('engine init failed')
 
     def start(self, filt: str) -> str | None:
         err = ctypes.create_string_buffer(512)
-        if self.dll.clumzy_start(filt.encode('utf-8', 'replace'), err, 512) == 0:
-            return err.value.decode('utf-8', 'replace') or 'Failed to start filtering.'
+        with self._lock:
+            if self.dll.clumzy_start(filt.encode('utf-8', 'replace'), err, 512) == 0:
+                return err.value.decode('utf-8', 'replace') or 'Failed to start filtering.'
         return None
 
     def stop(self) -> None:
-        self.dll.clumzy_stop()
+        with self._lock:
+            self.dll.clumzy_stop()
 
     def enable(self, name: str, on: bool) -> None:
         self.dll.clumzy_enable(name.encode('ascii'), 1 if on else 0)
@@ -469,6 +473,7 @@ class ClumzyWindow(QMainWindow):
         self._hotkey_armed = False
         self._engine_busy = False
         self._repeat_active = False
+        self._stop_requested = False
         self._loading_settings = True
         self._worker = None
         self.setWindowTitle('Clumzy 2.0 | Zub Clan 2026 | Last Updated: 090326')
@@ -1057,13 +1062,14 @@ class ClumzyWindow(QMainWindow):
         self._repeat_active = (
             self.trigger.currentText() == 'Timer' and self.repeat_chk.isChecked()
         )
+        self._stop_requested = False
         self.push_engine()
         filt = self.filter_edit.text().strip() or 'true'
         self._engine_busy = True
         self.start_btn.setEnabled(False)
         self.status.setText('Starting filter…')
         self._worker = EngineCallThread(lambda: self.engine.start(filt) or '')
-        self._worker.finished_ok.connect(self._on_started)
+        self._worker.finished_ok.connect(self._on_started, Qt.QueuedConnection)
         self._worker.start()
 
     def _on_started(self, error: str) -> None:
@@ -1074,9 +1080,13 @@ class ClumzyWindow(QMainWindow):
             self._worker = None
         if error:
             self._repeat_active = False
+            self._stop_requested = False
             self.status.setText(error)
             return
         self.running = True
+        if self._stop_requested:
+            self.stop_filter()
+            return
         self.start_btn.setText('Stop')
         self.filter_edit.setEnabled(False)
         if self.trigger.currentText() == 'Timer':
@@ -1100,12 +1110,12 @@ class ClumzyWindow(QMainWindow):
 
         def work() -> str:
             self.engine.stop()
-            if not self._repeat_active:
+            if not self._repeat_active or self._stop_requested:
                 return 'stopped'
             return self.engine.start(filt) or ''
 
         self._worker = EngineCallThread(work)
-        self._worker.finished_ok.connect(self._on_cycled)
+        self._worker.finished_ok.connect(self._on_cycled, Qt.QueuedConnection)
         self._worker.start()
 
     def _on_cycled(self, error: str) -> None:
@@ -1113,16 +1123,19 @@ class ClumzyWindow(QMainWindow):
         if self._worker:
             self._worker.deleteLater()
             self._worker = None
-        if error == 'stopped' or not self._repeat_active:
-            if error not in ('', 'stopped'):
-                try:
-                    self.engine.stop()
-                except Exception:
-                    pass
+        if error == 'stopped' or not self._repeat_active or self._stop_requested:
+            try:
+                self.engine.stop()
+            except Exception:
+                pass
             self._finish_stopped()
             return
         if error:
             self._repeat_active = False
+            try:
+                self.engine.stop()
+            except Exception:
+                pass
             self._finish_stopped()
             self.status.setText(error)
             return
@@ -1136,6 +1149,7 @@ class ClumzyWindow(QMainWindow):
     def stop_filter(self) -> None:
         self.auto_stop.stop()
         self._repeat_active = False
+        self._stop_requested = True
         if self._engine_busy:
             return
         if not self.running:
@@ -1145,7 +1159,7 @@ class ClumzyWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.status.setText('Stopping…')
         self._worker = EngineCallThread(lambda: self.engine.stop() or '')
-        self._worker.finished_ok.connect(self._on_stopped)
+        self._worker.finished_ok.connect(self._on_stopped, Qt.QueuedConnection)
         self._worker.start()
 
     def _on_stopped(self, _unused: str = '') -> None:
@@ -1158,6 +1172,7 @@ class ClumzyWindow(QMainWindow):
     def _finish_stopped(self) -> None:
         self.running = False
         self._repeat_active = False
+        self._stop_requested = False
         self.start_btn.setText('Start')
         self.start_btn.setEnabled(True)
         self.filter_edit.setEnabled(True)
@@ -1180,12 +1195,19 @@ class ClumzyWindow(QMainWindow):
         self.auto_stop.stop()
         self._hotkey_armed = False
         self._repeat_active = False
+        self._stop_requested = True
         self.save_settings()
-        if self.running:
+        if self._worker is not None:
             try:
-                self.engine.stop()
-            except Exception:
+                self._worker.finished_ok.disconnect()
+            except TypeError:
                 pass
+            if self._worker.isRunning():
+                self._worker.wait(10000)
+        try:
+            self.engine.stop()
+        except Exception:
+            pass
         event.accept()
 
 

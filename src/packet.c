@@ -3,15 +3,21 @@
 static PacketNode headNode = {0}, tailNode = {0};
 PacketNode * const head = &headNode, * const tail = &tailNode;
 
-void initPacketNodeList() {
-    if (head->next == NULL && tail->prev == NULL) {
-        // first time initializing
+void drainPacketNodeList() {
+    if (head->next == NULL || tail->prev == NULL) {
         head->next = tail;
         tail->prev = head;
-    } else {
-        // have used before, then check node is empty
-        assert(isListEmpty());
+        return;
     }
+    while (head->next != tail && head->next != NULL) {
+        freeNode(popNode(head->next));
+    }
+    head->next = tail;
+    tail->prev = head;
+}
+
+void initPacketNodeList() {
+    drainPacketNodeList();
 }
 
 // TODO  using malloc in the loop is not good for performance
