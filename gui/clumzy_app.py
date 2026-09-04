@@ -40,8 +40,10 @@ HOTKEY_COOLDOWN_S = 0.2
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
+VK_RMENU = 0xA5
+VK_OEM_4 = 0xDB  # US `[` key; German `[` is AltGr+8 instead.
 CYCLE_SETTLE_S = 0.08
-APP_BUILD = '090426c'
+APP_BUILD = '090426d'
 # First zip of a calendar day is MMDDYY with no letter (090426).
 # Same-day updates: b, c, ... z, then b2, c2, ... z2, then b3, ...
 # Skip the letter a. Also set tools/fresh-clumzy.ps1 $ExpectBuild to match.
@@ -415,6 +417,8 @@ def keybind_vk(keybind: str) -> tuple[int | None, int]:
         return None, 0
     scan = _USER32.VkKeyScanW(keybind[0])
     if scan == -1:
+        if keybind[0] == '[':
+            return VK_OEM_4, 0
         return None, 0
     return scan & 0xFF, (scan >> 8) & 0xFF
 
@@ -1306,24 +1310,30 @@ class ClumzyWindow(QMainWindow):
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
     def _keybind_is_down(self) -> bool:
-        if self._keybind_vk is None:
+        vk, mods = keybind_vk(self.keybind)
+        self._keybind_vk, self._keybind_mods = vk, mods
+        if vk is None:
             return False
-        if not (_USER32.GetAsyncKeyState(self._keybind_vk) & 0x8000):
+        if not (_USER32.GetAsyncKeyState(vk) & 0x8000):
             return False
-        mods = self._keybind_mods
         shift = bool(_USER32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
         ctrl = bool(_USER32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
         alt = bool(_USER32.GetAsyncKeyState(VK_MENU) & 0x8000)
-        if bool(mods & 1) != shift:
+        ralt = bool(_USER32.GetAsyncKeyState(VK_RMENU) & 0x8000)
+        altgr = ralt or (ctrl and alt)
+        need_shift = bool(mods & 1)
+        # VkKeyScanW encodes AltGr as Ctrl+Alt. Windows often only reports Right-Alt.
+        need_altgr = bool(mods & 2) and bool(mods & 4)
+        if need_shift != shift:
             return False
-        if bool(mods & 2) != ctrl:
-            return False
-        if bool(mods & 4) != alt:
+        if need_altgr:
+            return altgr
+        if ctrl or alt or ralt:
             return False
         return True
 
     def _poll_key(self) -> None:
-        if not self._hotkey_armed or self._keybind_vk is None:
+        if not self._hotkey_armed or not self.keybind:
             return
         down = self._keybind_is_down()
         if not down:
@@ -1336,9 +1346,6 @@ class ClumzyWindow(QMainWindow):
             return
         if time.monotonic() < self._hotkey_cool_until:
             self._hotkey_eat = True
-            return
-        focused = QApplication.focusWidget()
-        if focused is self.filter_edit and not self.running and not self._engine_busy:
             return
         self._hotkey_eat = True
         self._hotkey_posted = True
