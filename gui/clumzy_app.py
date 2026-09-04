@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import configparser
 import ctypes
+import locale
 import os
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 from ctypes import c_char_p, c_float, c_int, c_short, c_wchar
 
@@ -35,6 +37,10 @@ _USER32.VkKeyScanW.restype = c_short
 _USER32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 _USER32.GetAsyncKeyState.restype = c_short
 HOTKEY_COOLDOWN_S = 0.2
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_MENU = 0x12
+CYCLE_SETTLE_S = 0.08
 
 UI_BG = '#141414'
 UI_BTN = '#2b2b2b'
@@ -335,6 +341,26 @@ def parse_truth(value: str) -> bool:
     return str(value).strip().lower() in ('true', '1', 'on', 'yes')
 
 
+def parse_number(value, default: float = 0.0) -> float:
+    """Accept 1.5, 1,5, and German 1.234,5 without throwing."""
+    if value is None:
+        return default
+    raw = str(value).strip().replace('\u00a0', '').replace(' ', '')
+    if not raw:
+        return default
+    if ',' in raw and '.' in raw:
+        if raw.rfind(',') > raw.rfind('.'):
+            raw = raw.replace('.', '').replace(',', '.')
+        else:
+            raw = raw.replace(',', '')
+    elif ',' in raw:
+        raw = raw.replace(',', '.')
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def parse_config_filters(path: str) -> list[tuple[str, str]]:
     filters: list[tuple[str, str]] = []
     if not os.path.isfile(path):
@@ -377,13 +403,13 @@ def parse_presets(path: str) -> tuple[str, list[dict]]:
     return keybind, presets
 
 
-def keybind_vk(keybind: str) -> int | None:
+def keybind_vk(keybind: str) -> tuple[int | None, int]:
     if not keybind:
-        return None
+        return None, 0
     scan = _USER32.VkKeyScanW(keybind[0])
     if scan == -1:
-        return None
-    return scan & 0xFF
+        return None, 0
+    return scan & 0xFF, (scan >> 8) & 0xFF
 
 
 class Engine:
@@ -499,7 +525,7 @@ class ClumzyWindow(QMainWindow):
         self._hotkey_eat = False
         self._hotkey_posted = False
         self._hotkey_cool_until = 0.0
-        self._keybind_vk = keybind_vk(self.keybind)
+        self._keybind_vk, self._keybind_mods = keybind_vk(self.keybind)
         self._loading_settings = True
         self._worker = None
         self.setWindowTitle('Clumzy 2.0 | Zub Clan 2026 | Last Updated: 090326')
@@ -810,37 +836,37 @@ class ClumzyWindow(QMainWindow):
         preset = self.presets[index - 1]
         self.lag_in.setChecked(parse_truth(preset.get('Lag_Inbound', 'false')))
         self.lag_out.setChecked(parse_truth(preset.get('Lag_Outbound', 'false')))
-        self.lag_ms.setValue(int(float(preset.get('Lag_Delay', '0') or 0)))
+        self.lag_ms.setValue(int(parse_number(preset.get('Lag_Delay', '0'), 0)))
         self.drop_in.setChecked(parse_truth(preset.get('Drop_Inbound', 'false')))
         self.drop_out.setChecked(parse_truth(preset.get('Drop_Outbound', 'false')))
-        self.drop_chance.setValue(float(preset.get('Drop_Chance', '0') or 0))
+        self.drop_chance.setValue(parse_number(preset.get('Drop_Chance', '0'), 0))
         self.disc_in.setChecked(parse_truth(preset.get('Disconnect_Inbound', 'false')))
         self.disc_out.setChecked(parse_truth(preset.get('Disconnect_Outbound', 'false')))
         self.bw_in.setChecked(parse_truth(preset.get('BandwidthLimiter_Inbound', 'false')))
         self.bw_out.setChecked(parse_truth(preset.get('BandwidthLimiter_Outbound', 'false')))
-        self.bw_queue.setValue(int(float(preset.get('BandwidthLimiter_QueueSize', '0') or 0)))
-        self.bw_limit.setValue(int(float(preset.get('BandwidthLimiter_Limit', '0') or 0)))
+        self.bw_queue.setValue(int(parse_number(preset.get('BandwidthLimiter_QueueSize', '0'), 0)))
+        self.bw_limit.setValue(int(parse_number(preset.get('BandwidthLimiter_Limit', '0'), 0)))
         unit = (preset.get('BandwidthLimiter_Size', 'kb') or 'kb').lower()
         self.bw_unit.setCurrentIndex(0 if unit == 'kb' else 1)
         self.th_in.setChecked(parse_truth(preset.get('Throttle_Inbound', 'false')))
         self.th_out.setChecked(parse_truth(preset.get('Throttle_Outbound', 'false')))
         self.th_drop.setChecked(parse_truth(preset.get('Throttle_DropThrottled', 'false')))
-        self.th_frame.setValue(int(float(preset.get('Throttle_Timeframe', '0') or 0)))
-        self.th_chance.setValue(float(preset.get('Throttle_Chance', '0') or 0))
+        self.th_frame.setValue(int(parse_number(preset.get('Throttle_Timeframe', '0'), 0)))
+        self.th_chance.setValue(parse_number(preset.get('Throttle_Chance', '0'), 0))
         self.dup_in.setChecked(parse_truth(preset.get('Duplicate_Inbound', 'false')))
         self.dup_out.setChecked(parse_truth(preset.get('Duplicate_Outbound', 'false')))
-        self.dup_count.setValue(int(float(preset.get('Duplicate_Count', '0') or 0)))
-        self.dup_chance.setValue(float(preset.get('Duplicate_Chance', '0') or 0))
+        self.dup_count.setValue(int(parse_number(preset.get('Duplicate_Count', '0'), 0)))
+        self.dup_chance.setValue(parse_number(preset.get('Duplicate_Chance', '0'), 0))
         self.ood_in.setChecked(parse_truth(preset.get('OutOfOrder_Inbound', 'false')))
         self.ood_out.setChecked(parse_truth(preset.get('OutOfOrder_Outbound', 'false')))
-        self.ood_chance.setValue(float(preset.get('OutOfOrder_Chance', '0') or 0))
+        self.ood_chance.setValue(parse_number(preset.get('OutOfOrder_Chance', '0'), 0))
         self.tam_in.setChecked(parse_truth(preset.get('Tamper_Inbound', 'false')))
         self.tam_out.setChecked(parse_truth(preset.get('Tamper_Outbound', 'false')))
         self.tam_sum.setChecked(parse_truth(preset.get('Tamper_RedoChecksum', 'false')))
-        self.tam_chance.setValue(float(preset.get('Tamper_Chance', '0') or 0))
+        self.tam_chance.setValue(parse_number(preset.get('Tamper_Chance', '0'), 0))
         self.rst_in.setChecked(parse_truth(preset.get('SetTCPRST_Inbound', 'false')))
         self.rst_out.setChecked(parse_truth(preset.get('SetTCPRST_Outbound', 'false')))
-        self.rst_chance.setValue(float(preset.get('SetTCPRST_Chance', '0') or 0))
+        self.rst_chance.setValue(parse_number(preset.get('SetTCPRST_Chance', '0'), 0))
         self.schedule_push()
 
     def schedule_push(self) -> None:
@@ -886,10 +912,7 @@ class ClumzyWindow(QMainWindow):
             if idx >= 0:
                 self.trigger.setCurrentIndex(idx)
             self._on_trigger(self.trigger.currentText())
-            try:
-                self.timer_secs.setValue(float(s.get('TimerSeconds', '1') or 1))
-            except ValueError:
-                pass
+            self.timer_secs.setValue(parse_number(s.get('TimerSeconds', '1'), 1.0))
             self.repeat_chk.setChecked(parse_truth(s.get('Repeat', 'false')))
             try:
                 net = int(s.get('Network', '2') or 2)
@@ -920,6 +943,8 @@ class ClumzyWindow(QMainWindow):
             except ValueError:
                 pass
             self._apply_saved_modules(s)
+        except Exception:
+            pass
         finally:
             self._loading_settings = False
 
@@ -930,16 +955,10 @@ class ClumzyWindow(QMainWindow):
             return parse_truth(s.get(key, str(default)))
 
         def _float(key: str, default: float) -> float:
-            try:
-                return float(s.get(key, str(default)) or default)
-            except ValueError:
-                return default
+            return parse_number(s.get(key, str(default)), default)
 
         def _int(key: str, default: int) -> int:
-            try:
-                return int(float(s.get(key, str(default)) or default))
-            except ValueError:
-                return default
+            return int(parse_number(s.get(key, str(default)), float(default)))
 
         self.lag_row.enabled.setChecked(_bool('LagEnabled', False))
         self.lag_in.setChecked(_bool('LagInbound', True))
@@ -1051,36 +1070,39 @@ class ClumzyWindow(QMainWindow):
         e = self.engine
         if e is None:
             return
-        with e._lock:
-            e.dll.clumzy_set_network(int(self.network.currentData() or 2))
-            e.enable('lag', self.lag_row.enabled.isChecked())
-            e.dll.clumzy_lag(int(self.lag_in.isChecked()), int(self.lag_out.isChecked()), int(self.lag_ms.value()))
-            e.enable('drop', self.drop_row.enabled.isChecked())
-            e.dll.clumzy_drop(int(self.drop_in.isChecked()), int(self.drop_out.isChecked()), c_float(self.drop_chance.value()))
-            e.enable('disconnect', self.disc_row.enabled.isChecked())
-            e.dll.clumzy_disconnect(int(self.disc_in.isChecked()), int(self.disc_out.isChecked()))
-            e.enable('bandwidth', self.bw_row.enabled.isChecked())
-            e.dll.clumzy_bandwidth(
-                int(self.bw_in.isChecked()), int(self.bw_out.isChecked()),
-                int(self.bw_limit.value()), int(self.bw_queue.value()),
-                1 if self.bw_unit.currentData() else 0)
-            e.enable('throttle', self.th_row.enabled.isChecked())
-            e.dll.clumzy_throttle(
-                int(self.th_in.isChecked()), int(self.th_out.isChecked()),
-                c_float(self.th_chance.value()), int(self.th_frame.value()),
-                int(self.th_drop.isChecked()))
-            e.enable('duplicate', self.dup_row.enabled.isChecked())
-            e.dll.clumzy_duplicate(
-                int(self.dup_in.isChecked()), int(self.dup_out.isChecked()),
-                c_float(self.dup_chance.value()), int(self.dup_count.value()))
-            e.enable('ood', self.ood_row.enabled.isChecked())
-            e.dll.clumzy_ood(int(self.ood_in.isChecked()), int(self.ood_out.isChecked()), c_float(self.ood_chance.value()))
-            e.enable('tamper', self.tam_row.enabled.isChecked())
-            e.dll.clumzy_tamper(
-                int(self.tam_in.isChecked()), int(self.tam_out.isChecked()),
-                c_float(self.tam_chance.value()), int(self.tam_sum.isChecked()))
-            e.enable('reset', self.rst_row.enabled.isChecked())
-            e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
+        try:
+            with e._lock:
+                e.dll.clumzy_set_network(int(self.network.currentData() or 2))
+                e.enable('lag', self.lag_row.enabled.isChecked())
+                e.dll.clumzy_lag(int(self.lag_in.isChecked()), int(self.lag_out.isChecked()), int(self.lag_ms.value()))
+                e.enable('drop', self.drop_row.enabled.isChecked())
+                e.dll.clumzy_drop(int(self.drop_in.isChecked()), int(self.drop_out.isChecked()), c_float(self.drop_chance.value()))
+                e.enable('disconnect', self.disc_row.enabled.isChecked())
+                e.dll.clumzy_disconnect(int(self.disc_in.isChecked()), int(self.disc_out.isChecked()))
+                e.enable('bandwidth', self.bw_row.enabled.isChecked())
+                e.dll.clumzy_bandwidth(
+                    int(self.bw_in.isChecked()), int(self.bw_out.isChecked()),
+                    int(self.bw_limit.value()), int(self.bw_queue.value()),
+                    1 if self.bw_unit.currentData() else 0)
+                e.enable('throttle', self.th_row.enabled.isChecked())
+                e.dll.clumzy_throttle(
+                    int(self.th_in.isChecked()), int(self.th_out.isChecked()),
+                    c_float(self.th_chance.value()), int(self.th_frame.value()),
+                    int(self.th_drop.isChecked()))
+                e.enable('duplicate', self.dup_row.enabled.isChecked())
+                e.dll.clumzy_duplicate(
+                    int(self.dup_in.isChecked()), int(self.dup_out.isChecked()),
+                    c_float(self.dup_chance.value()), int(self.dup_count.value()))
+                e.enable('ood', self.ood_row.enabled.isChecked())
+                e.dll.clumzy_ood(int(self.ood_in.isChecked()), int(self.ood_out.isChecked()), c_float(self.ood_chance.value()))
+                e.enable('tamper', self.tam_row.enabled.isChecked())
+                e.dll.clumzy_tamper(
+                    int(self.tam_in.isChecked()), int(self.tam_out.isChecked()),
+                    c_float(self.tam_chance.value()), int(self.tam_sum.isChecked()))
+                e.enable('reset', self.rst_row.enabled.isChecked())
+                e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
+        except Exception:
+            pass
 
     def toggle_filter(self) -> None:
         if self._want_running:
@@ -1175,6 +1197,14 @@ class ClumzyWindow(QMainWindow):
                 or self._stop_requested
             ):
                 return 'stopped'
+            time.sleep(CYCLE_SETTLE_S)
+            if (
+                run_id != self._run_id
+                or not self._want_running
+                or not self._repeat_active
+                or self._stop_requested
+            ):
+                return 'stopped'
             return self.engine.start(filt) or ''
 
         self._launch_engine(work, self._on_cycled)
@@ -1204,12 +1234,15 @@ class ClumzyWindow(QMainWindow):
         self._pump_ops()
 
     def _on_timer_elapsed(self) -> None:
-        if self._want_running and self._repeat_active:
-            if 'cycle' not in self._op_queue:
-                self._op_queue.append('cycle')
-            self._pump_ops()
-            return
-        self.stop_filter()
+        try:
+            if self._want_running and self._repeat_active:
+                if 'cycle' not in self._op_queue:
+                    self._op_queue.append('cycle')
+                self._pump_ops()
+                return
+            self.stop_filter()
+        except Exception:
+            self.stop_filter()
 
     def _on_cycled(self, error: str) -> None:
         self._engine_busy = False
@@ -1253,10 +1286,27 @@ class ClumzyWindow(QMainWindow):
         self.start_btn.setEnabled(not self._engine_busy and not self._op_queue)
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
+    def _keybind_is_down(self) -> bool:
+        if self._keybind_vk is None:
+            return False
+        if not (_USER32.GetAsyncKeyState(self._keybind_vk) & 0x8000):
+            return False
+        mods = self._keybind_mods
+        shift = bool(_USER32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+        ctrl = bool(_USER32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+        alt = bool(_USER32.GetAsyncKeyState(VK_MENU) & 0x8000)
+        if bool(mods & 1) != shift:
+            return False
+        if bool(mods & 2) != ctrl:
+            return False
+        if bool(mods & 4) != alt:
+            return False
+        return True
+
     def _poll_key(self) -> None:
         if not self._hotkey_armed or self._keybind_vk is None:
             return
-        down = (_USER32.GetAsyncKeyState(self._keybind_vk) & 0x8000) != 0
+        down = self._keybind_is_down()
         if not down:
             self._key_down = False
             self._hotkey_eat = False
@@ -1310,7 +1360,25 @@ def already_running() -> bool:
     return ctypes.windll.kernel32.GetLastError() == 183 and bool(handle)
 
 
+def _excepthook(exc_type, exc, tb) -> None:
+    text = ''.join(traceback.format_exception(exc_type, exc, tb))
+    try:
+        log_path = os.path.join(app_dir(), 'clumzy-error.log')
+        with open(log_path, 'a', encoding='utf-8') as handle:
+            handle.write(text + '\n')
+    except OSError:
+        pass
+    app = QApplication.instance()
+    if app is not None:
+        QMessageBox.critical(None, 'Clumzy', f'Something went wrong:\n{exc}')
+
+
 def main() -> int:
+    try:
+        locale.setlocale(locale.LC_NUMERIC, 'C')
+    except locale.Error:
+        pass
+    sys.excepthook = _excepthook
     os.chdir(app_dir())
     set_win_app_id()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -1334,19 +1402,23 @@ def main() -> int:
         return 1
     try:
         engine = Engine(dll_path)
-    except OSError as exc:
+    except Exception as exc:
         QMessageBox.critical(None, 'Clumzy', f'Could not load the packet engine.\n{exc}')
         return 1
 
-    filters = parse_config_filters(os.path.join(app_dir(), 'config.txt'))
-    keybind, presets = parse_presets(os.path.join(app_dir(), 'presets.ini'))
-    window = ClumzyWindow(engine, filters, keybind, presets)
-    window.setStyleSheet(zubcut_qss())
-    window.resize(860, 760)
-    window.show()
-    hwnd = int(window.winId())
-    apply_dark_titlebar(hwnd)
-    apply_taskbar_icon(hwnd, resource_path('clumzy-icon.ico'))
+    try:
+        filters = parse_config_filters(os.path.join(app_dir(), 'config.txt'))
+        keybind, presets = parse_presets(os.path.join(app_dir(), 'presets.ini'))
+        window = ClumzyWindow(engine, filters, keybind, presets)
+        window.setStyleSheet(zubcut_qss())
+        window.resize(860, 760)
+        window.show()
+        hwnd = int(window.winId())
+        apply_dark_titlebar(hwnd)
+        apply_taskbar_icon(hwnd, resource_path('clumzy-icon.ico'))
+    except Exception as exc:
+        QMessageBox.critical(None, 'Clumzy', f'Could not open Clumzy.\n{exc}')
+        return 1
     return app.exec_()
 
 

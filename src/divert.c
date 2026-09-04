@@ -107,6 +107,7 @@ int divertStart(const char *filter, char buf[]) {
 
     if (loopThread || clockThread || divertHandleLive()) {
         divertStopUnlocked();
+        Sleep(50);
     }
 
     //WINDIVERT_LAYER_NETWORK_FORWARD

@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 settings.ini
+clumzy-error.log
 bin/
 build/
 dist/

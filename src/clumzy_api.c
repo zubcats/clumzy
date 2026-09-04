@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <locale.h>
 #include <Windows.h>
 #include "common.h"
 #include "clumzy_api.h"
@@ -17,6 +18,7 @@
 static volatile short g_running = 0;
 
 int clumzy_engine_init(void) {
+    setlocale(LC_NUMERIC, "C");
     srand((unsigned int)time(NULL));
     NetworkType = 0;
     parameterized = 0;
