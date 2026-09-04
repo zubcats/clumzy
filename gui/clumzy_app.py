@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+from collections import deque
 from ctypes import c_char_p, c_float, c_int, c_short, c_wchar
 
 from PyQt5.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
@@ -492,6 +493,9 @@ class ClumzyWindow(QMainWindow):
         self._engine_busy = False
         self._repeat_active = False
         self._stop_requested = False
+        self._want_running = False
+        self._run_id = 0
+        self._op_queue: deque[str] = deque()
         self._hotkey_eat = False
         self._hotkey_posted = False
         self._hotkey_cool_until = 0.0
@@ -1079,131 +1083,174 @@ class ClumzyWindow(QMainWindow):
             e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
 
     def toggle_filter(self) -> None:
-        if self.running or self._repeat_active or self._engine_busy:
+        if self._want_running:
             self.stop_filter()
         else:
             self.start_filter()
 
     def start_filter(self) -> None:
+        self._want_running = True
+        self._stop_requested = False
+        self._op_queue = deque(op for op in self._op_queue if op != 'cycle')
+        if 'start' not in self._op_queue:
+            self._op_queue.append('start')
+        self._pump_ops()
+
+    def stop_filter(self) -> None:
+        self.auto_stop.stop()
+        self._want_running = False
+        self._repeat_active = False
+        self._stop_requested = True
+        self._run_id += 1
+        self._op_queue = deque(op for op in self._op_queue if op == 'stop')
+        if 'stop' not in self._op_queue:
+            self._op_queue.append('stop')
+        self._pump_ops()
+
+    def _sync_start_btn(self) -> None:
+        busy = self._engine_busy or bool(self._op_queue)
+        self.start_btn.setEnabled(not busy)
+        if self.running or self._repeat_active or self._want_running:
+            self.start_btn.setText('Stop')
+        else:
+            self.start_btn.setText('Start')
+
+    def _clear_worker(self) -> None:
+        if self._worker:
+            self._worker.deleteLater()
+            self._worker = None
+
+    def _launch_engine(self, fn, slot) -> None:
+        self._engine_busy = True
+        self.start_btn.setEnabled(False)
+        self._worker = EngineCallThread(fn)
+        self._worker.finished_ok.connect(slot, Qt.QueuedConnection)
+        self._worker.start()
+
+    def _pump_ops(self) -> None:
         if self._engine_busy:
             return
+        while self._op_queue:
+            op = self._op_queue.popleft()
+            if op == 'stop':
+                if not self.running:
+                    self._finish_stopped()
+                    continue
+                self.status.setText('Stopping…')
+                self._launch_engine(lambda: self.engine.stop() or '', self._on_stopped)
+                return
+            if op == 'start':
+                if not self._want_running or self._stop_requested:
+                    continue
+                self._begin_start()
+                return
+            if op == 'cycle':
+                if not self._want_running or not self._repeat_active or self._stop_requested:
+                    continue
+                self._begin_cycle()
+                return
+        self._sync_start_btn()
+
+    def _begin_start(self) -> None:
         self._repeat_active = (
             self.trigger.currentText() == 'Timer' and self.repeat_chk.isChecked()
         )
         self._stop_requested = False
         self.push_engine()
         filt = self.filter_edit.text().strip() or 'true'
-        self._engine_busy = True
-        self.start_btn.setEnabled(False)
         self.status.setText('Starting filter…')
-        self._worker = EngineCallThread(lambda: self.engine.start(filt) or '')
-        self._worker.finished_ok.connect(self._on_started, Qt.QueuedConnection)
-        self._worker.start()
+        self._launch_engine(lambda: self.engine.start(filt) or '', self._on_started)
+
+    def _begin_cycle(self) -> None:
+        filt = self.filter_edit.text().strip() or 'true'
+        run_id = self._run_id
+        self.status.setText('Cycling off/on…')
+
+        def work() -> str:
+            self.engine.stop()
+            if (
+                run_id != self._run_id
+                or not self._want_running
+                or not self._repeat_active
+                or self._stop_requested
+            ):
+                return 'stopped'
+            return self.engine.start(filt) or ''
+
+        self._launch_engine(work, self._on_cycled)
 
     def _on_started(self, error: str) -> None:
         self._engine_busy = False
-        self.start_btn.setEnabled(True)
-        if self._worker:
-            self._worker.deleteLater()
-            self._worker = None
+        self._clear_worker()
         if error:
             self._repeat_active = False
+            self._want_running = False
             self._stop_requested = False
+            self._op_queue.clear()
+            self._finish_stopped()
             self.status.setText(error)
             return
         self.running = True
-        if self._stop_requested:
+        if not self._want_running or self._stop_requested:
             self.stop_filter()
             return
-        self.start_btn.setText('Stop')
         self.filter_edit.setEnabled(False)
+        self._sync_start_btn()
         if self.trigger.currentText() == 'Timer':
             self.auto_stop.start(self._timer_ms())
             self.status.setText(self._timer_status())
         else:
             self.status.setText('Started filtering. Enable functionalities to take effect.')
+        self._pump_ops()
 
     def _on_timer_elapsed(self) -> None:
-        if self._repeat_active:
-            self._cycle_filter()
-        else:
-            self.stop_filter()
-
-    def _cycle_filter(self) -> None:
-        if self._engine_busy or not self._repeat_active:
+        if self._want_running and self._repeat_active:
+            if 'cycle' not in self._op_queue:
+                self._op_queue.append('cycle')
+            self._pump_ops()
             return
-        filt = self.filter_edit.text().strip() or 'true'
-        self._engine_busy = True
-        self.status.setText('Cycling off/on…')
-
-        def work() -> str:
-            self.engine.stop()
-            if not self._repeat_active or self._stop_requested:
-                return 'stopped'
-            return self.engine.start(filt) or ''
-
-        self._worker = EngineCallThread(work)
-        self._worker.finished_ok.connect(self._on_cycled, Qt.QueuedConnection)
-        self._worker.start()
+        self.stop_filter()
 
     def _on_cycled(self, error: str) -> None:
         self._engine_busy = False
-        if self._worker:
-            self._worker.deleteLater()
-            self._worker = None
-        if error == 'stopped' or not self._repeat_active or self._stop_requested:
-            try:
-                self.engine.stop()
-            except Exception:
-                pass
+        self._clear_worker()
+        if error == 'stopped' or not self._want_running or not self._repeat_active or self._stop_requested:
+            if error != 'stopped':
+                self.stop_filter()
+                return
             self._finish_stopped()
+            self._pump_ops()
             return
         if error:
             self._repeat_active = False
-            try:
-                self.engine.stop()
-            except Exception:
-                pass
-            self._finish_stopped()
+            self._want_running = False
             self.status.setText(error)
+            self.stop_filter()
             return
         self.running = True
-        self.start_btn.setText('Stop')
-        self.start_btn.setEnabled(True)
+        if not self._want_running or self._stop_requested:
+            self.stop_filter()
+            return
         self.filter_edit.setEnabled(False)
+        self._sync_start_btn()
         self.auto_stop.start(self._timer_ms())
         self.status.setText(self._timer_status())
-
-    def stop_filter(self) -> None:
-        self.auto_stop.stop()
-        self._repeat_active = False
-        self._stop_requested = True
-        if self._engine_busy:
-            return
-        if not self.running:
-            self._finish_stopped()
-            return
-        self._engine_busy = True
-        self.start_btn.setEnabled(False)
-        self.status.setText('Stopping…')
-        self._worker = EngineCallThread(lambda: self.engine.stop() or '')
-        self._worker.finished_ok.connect(self._on_stopped, Qt.QueuedConnection)
-        self._worker.start()
+        self._pump_ops()
 
     def _on_stopped(self, _unused: str = '') -> None:
         self._engine_busy = False
-        if self._worker:
-            self._worker.deleteLater()
-            self._worker = None
+        self._clear_worker()
         self._finish_stopped()
+        self._pump_ops()
 
     def _finish_stopped(self) -> None:
         self.running = False
         self._repeat_active = False
-        self._stop_requested = False
+        if not self._want_running:
+            self._stop_requested = False
         self.start_btn.setText('Start')
-        self.start_btn.setEnabled(True)
         self.filter_edit.setEnabled(True)
+        self.start_btn.setEnabled(not self._engine_busy and not self._op_queue)
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
     def _poll_key(self) -> None:
@@ -1231,19 +1278,17 @@ class ClumzyWindow(QMainWindow):
     def _hotkey_toggle(self) -> None:
         self._hotkey_posted = False
         self._hotkey_cool_until = time.monotonic() + HOTKEY_COOLDOWN_S
-        if self._engine_busy:
-            self.auto_stop.stop()
-            self._repeat_active = False
-            self._stop_requested = True
-            return
         self.toggle_filter()
 
     def closeEvent(self, event) -> None:
         self.key_timer.stop()
         self.auto_stop.stop()
         self._hotkey_armed = False
+        self._want_running = False
         self._repeat_active = False
         self._stop_requested = True
+        self._run_id += 1
+        self._op_queue.clear()
         self.save_settings()
         if self._worker is not None:
             try:
