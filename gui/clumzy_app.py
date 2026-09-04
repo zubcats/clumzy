@@ -6,7 +6,8 @@ import ctypes
 import os
 import sys
 import threading
-from ctypes import c_char_p, c_float, c_int
+import time
+from ctypes import c_char_p, c_float, c_int, c_short, c_wchar
 
 from PyQt5.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
@@ -26,6 +27,13 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_USER32 = ctypes.windll.user32
+_USER32.VkKeyScanW.argtypes = [c_wchar]
+_USER32.VkKeyScanW.restype = c_short
+_USER32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+_USER32.GetAsyncKeyState.restype = c_short
+HOTKEY_COOLDOWN_S = 0.2
 
 UI_BG = '#141414'
 UI_BTN = '#2b2b2b'
@@ -368,6 +376,15 @@ def parse_presets(path: str) -> tuple[str, list[dict]]:
     return keybind, presets
 
 
+def keybind_vk(keybind: str) -> int | None:
+    if not keybind:
+        return None
+    scan = _USER32.VkKeyScanW(keybind[0])
+    if scan == -1:
+        return None
+    return scan & 0xFF
+
+
 class Engine:
     def __init__(self, dll_path: str) -> None:
         self.dll = ctypes.CDLL(dll_path)
@@ -389,7 +406,7 @@ class Engine:
         self.dll.clumzy_tamper.argtypes = [c_int, c_int, c_float, c_int]
         self.dll.clumzy_reset.argtypes = [c_int, c_int, c_float]
         self.dll.clumzy_reset_next.argtypes = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         if self.dll.clumzy_engine_init() == 0:
             raise RuntimeError('engine init failed')
 
@@ -405,7 +422,8 @@ class Engine:
             self.dll.clumzy_stop()
 
     def enable(self, name: str, on: bool) -> None:
-        self.dll.clumzy_enable(name.encode('ascii'), 1 if on else 0)
+        with self._lock:
+            self.dll.clumzy_enable(name.encode('ascii'), 1 if on else 0)
 
 
 class EngineCallThread(QThread):
@@ -474,6 +492,10 @@ class ClumzyWindow(QMainWindow):
         self._engine_busy = False
         self._repeat_active = False
         self._stop_requested = False
+        self._hotkey_eat = False
+        self._hotkey_posted = False
+        self._hotkey_cool_until = 0.0
+        self._keybind_vk = keybind_vk(self.keybind)
         self._loading_settings = True
         self._worker = None
         self.setWindowTitle('Clumzy 2.0 | Zub Clan 2026 | Last Updated: 090326')
@@ -489,6 +511,8 @@ class ClumzyWindow(QMainWindow):
 
         self.filter_edit = QLineEdit(filters[0][1] if filters else 'true')
         self.start_btn = QPushButton('Start')
+        self.start_btn.setAutoDefault(False)
+        self.start_btn.setDefault(False)
         self.start_btn.clicked.connect(self.toggle_filter)
         self.network = QComboBox()
         self.network.addItem('(Local) This Device', 1)
@@ -825,13 +849,16 @@ class ClumzyWindow(QMainWindow):
         self._save.start()
 
     def eventFilter(self, obj, event) -> bool:
-        if event.type() in (QEvent.KeyPress, QEvent.ShortcutOverride) and self.keybind:
+        if event.type() in (QEvent.KeyPress, QEvent.ShortcutOverride, QEvent.KeyRelease) and self.keybind:
             text = event.text()
             if text and text[:1].lower() == self.keybind[:1].lower():
                 focused = QApplication.focusWidget()
-                if isinstance(obj, (QComboBox, QSpinBox, QDoubleSpinBox)) or isinstance(
-                    focused, (QComboBox, QSpinBox, QDoubleSpinBox)
-                ):
+                typing_filter = (
+                    not self.running
+                    and not self._engine_busy
+                    and (obj is self.filter_edit or focused is self.filter_edit)
+                )
+                if not typing_filter:
                     return True
         return super().eventFilter(obj, event)
 
@@ -1020,35 +1047,36 @@ class ClumzyWindow(QMainWindow):
         e = self.engine
         if e is None:
             return
-        e.dll.clumzy_set_network(int(self.network.currentData() or 2))
-        e.enable('lag', self.lag_row.enabled.isChecked())
-        e.dll.clumzy_lag(int(self.lag_in.isChecked()), int(self.lag_out.isChecked()), int(self.lag_ms.value()))
-        e.enable('drop', self.drop_row.enabled.isChecked())
-        e.dll.clumzy_drop(int(self.drop_in.isChecked()), int(self.drop_out.isChecked()), c_float(self.drop_chance.value()))
-        e.enable('disconnect', self.disc_row.enabled.isChecked())
-        e.dll.clumzy_disconnect(int(self.disc_in.isChecked()), int(self.disc_out.isChecked()))
-        e.enable('bandwidth', self.bw_row.enabled.isChecked())
-        e.dll.clumzy_bandwidth(
-            int(self.bw_in.isChecked()), int(self.bw_out.isChecked()),
-            int(self.bw_limit.value()), int(self.bw_queue.value()),
-            1 if self.bw_unit.currentData() else 0)
-        e.enable('throttle', self.th_row.enabled.isChecked())
-        e.dll.clumzy_throttle(
-            int(self.th_in.isChecked()), int(self.th_out.isChecked()),
-            c_float(self.th_chance.value()), int(self.th_frame.value()),
-            int(self.th_drop.isChecked()))
-        e.enable('duplicate', self.dup_row.enabled.isChecked())
-        e.dll.clumzy_duplicate(
-            int(self.dup_in.isChecked()), int(self.dup_out.isChecked()),
-            c_float(self.dup_chance.value()), int(self.dup_count.value()))
-        e.enable('ood', self.ood_row.enabled.isChecked())
-        e.dll.clumzy_ood(int(self.ood_in.isChecked()), int(self.ood_out.isChecked()), c_float(self.ood_chance.value()))
-        e.enable('tamper', self.tam_row.enabled.isChecked())
-        e.dll.clumzy_tamper(
-            int(self.tam_in.isChecked()), int(self.tam_out.isChecked()),
-            c_float(self.tam_chance.value()), int(self.tam_sum.isChecked()))
-        e.enable('reset', self.rst_row.enabled.isChecked())
-        e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
+        with e._lock:
+            e.dll.clumzy_set_network(int(self.network.currentData() or 2))
+            e.enable('lag', self.lag_row.enabled.isChecked())
+            e.dll.clumzy_lag(int(self.lag_in.isChecked()), int(self.lag_out.isChecked()), int(self.lag_ms.value()))
+            e.enable('drop', self.drop_row.enabled.isChecked())
+            e.dll.clumzy_drop(int(self.drop_in.isChecked()), int(self.drop_out.isChecked()), c_float(self.drop_chance.value()))
+            e.enable('disconnect', self.disc_row.enabled.isChecked())
+            e.dll.clumzy_disconnect(int(self.disc_in.isChecked()), int(self.disc_out.isChecked()))
+            e.enable('bandwidth', self.bw_row.enabled.isChecked())
+            e.dll.clumzy_bandwidth(
+                int(self.bw_in.isChecked()), int(self.bw_out.isChecked()),
+                int(self.bw_limit.value()), int(self.bw_queue.value()),
+                1 if self.bw_unit.currentData() else 0)
+            e.enable('throttle', self.th_row.enabled.isChecked())
+            e.dll.clumzy_throttle(
+                int(self.th_in.isChecked()), int(self.th_out.isChecked()),
+                c_float(self.th_chance.value()), int(self.th_frame.value()),
+                int(self.th_drop.isChecked()))
+            e.enable('duplicate', self.dup_row.enabled.isChecked())
+            e.dll.clumzy_duplicate(
+                int(self.dup_in.isChecked()), int(self.dup_out.isChecked()),
+                c_float(self.dup_chance.value()), int(self.dup_count.value()))
+            e.enable('ood', self.ood_row.enabled.isChecked())
+            e.dll.clumzy_ood(int(self.ood_in.isChecked()), int(self.ood_out.isChecked()), c_float(self.ood_chance.value()))
+            e.enable('tamper', self.tam_row.enabled.isChecked())
+            e.dll.clumzy_tamper(
+                int(self.tam_in.isChecked()), int(self.tam_out.isChecked()),
+                c_float(self.tam_chance.value()), int(self.tam_sum.isChecked()))
+            e.enable('reset', self.rst_row.enabled.isChecked())
+            e.dll.clumzy_reset(int(self.rst_in.isChecked()), int(self.rst_out.isChecked()), c_float(self.rst_chance.value()))
 
     def toggle_filter(self) -> None:
         if self.running or self._repeat_active or self._engine_busy:
@@ -1179,16 +1207,36 @@ class ClumzyWindow(QMainWindow):
         self.status.setText('Stopped. To begin again, edit criteria and click Start.')
 
     def _poll_key(self) -> None:
-        if not self._hotkey_armed or not self.keybind:
+        if not self._hotkey_armed or self._keybind_vk is None:
             return
-        scan = ctypes.windll.user32.VkKeyScanW(ord(self.keybind[0]))
-        if scan == -1:
+        down = (_USER32.GetAsyncKeyState(self._keybind_vk) & 0x8000) != 0
+        if not down:
+            self._key_down = False
+            self._hotkey_eat = False
             return
-        vk = scan & 0xFF
-        down = (ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000) != 0
-        if down and not self._key_down:
-            self.toggle_filter()
-        self._key_down = down
+        rising = not self._key_down
+        self._key_down = True
+        if not rising or self._hotkey_eat or self._hotkey_posted:
+            return
+        if time.monotonic() < self._hotkey_cool_until:
+            self._hotkey_eat = True
+            return
+        focused = QApplication.focusWidget()
+        if focused is self.filter_edit and not self.running and not self._engine_busy:
+            return
+        self._hotkey_eat = True
+        self._hotkey_posted = True
+        QTimer.singleShot(0, self._hotkey_toggle)
+
+    def _hotkey_toggle(self) -> None:
+        self._hotkey_posted = False
+        self._hotkey_cool_until = time.monotonic() + HOTKEY_COOLDOWN_S
+        if self._engine_busy:
+            self.auto_stop.stop()
+            self._repeat_active = False
+            self._stop_requested = True
+            return
+        self.toggle_filter()
 
     def closeEvent(self, event) -> None:
         self.key_timer.stop()
