@@ -41,7 +41,7 @@ VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
 CYCLE_SETTLE_S = 0.08
-APP_BUILD = '090426b'
+APP_BUILD = '090426c'
 # First zip of a calendar day is MMDDYY with no letter (090426).
 # Same-day updates: b, c, ... z, then b2, c2, ... z2, then b3, ...
 # Skip the letter a. Also set tools/fresh-clumzy.ps1 $ExpectBuild to match.
@@ -952,8 +952,10 @@ class ClumzyWindow(QMainWindow):
                     self.func_presets.setCurrentIndex(gp)
                     self.func_presets.blockSignals(False)
             except ValueError:
-                pass
+                gp = 0
             self._apply_saved_modules(s)
+            if gp > 0:
+                self._on_func_preset(gp)
         except Exception:
             pass
         finally:
@@ -1154,11 +1156,17 @@ class ClumzyWindow(QMainWindow):
             self._worker = None
 
     def _launch_engine(self, fn, slot) -> None:
+        # Kali/clumsy ran divertStart/Stop on the UI thread. Doing the same
+        # here avoids WinDivert Open/Close from a Python worker thread.
         self._engine_busy = True
         self.start_btn.setEnabled(False)
-        self._worker = EngineCallThread(fn)
-        self._worker.finished_ok.connect(slot, Qt.QueuedConnection)
-        self._worker.start()
+        try:
+            result = fn()
+            if not isinstance(result, str):
+                result = ''
+        except Exception as exc:
+            result = str(exc)
+        slot(result)
 
     def _pump_ops(self) -> None:
         if self._engine_busy:

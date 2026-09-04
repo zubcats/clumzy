@@ -358,9 +358,9 @@ static DWORD divertClockLoop(LPVOID arg) {
                 lastSendCount = sendAllListPackets();
                 LOG("Lastly sent %d packets. Closing...", lastSendCount);
 
-                // Kali/clumsy: recv unblocks because THIS thread closes the handle
+                /* Do not NULL divertHandle here. Recv still uses it until it
+                   returns ERROR_INVALID_HANDLE, same as original clumsy. */
                 closed = WinDivertClose(divertHandle);
-                divertHandle = NULL;
                 if (!closed) {
                     LOG("WinDivertClose failed (%lu)", GetLastError());
                 }
@@ -390,7 +390,9 @@ static DWORD divertReadLoop(LPVOID arg) {
         assert(isListEmpty()); // FIXME has failed this assert before. don't know why
         if (!WinDivertRecv(divertHandle, packetBuf, MAX_PACKETSIZE, &readLen, &addrBuf)) {
             DWORD lastError = GetLastError();
-            if (lastError == ERROR_INVALID_HANDLE || lastError == ERROR_OPERATION_ABORTED) {
+            if (stopLooping ||
+                lastError == ERROR_INVALID_HANDLE ||
+                lastError == ERROR_OPERATION_ABORTED) {
                 LOG("Handle died or operation aborted. Exit loop.");
                 return 0;
             }

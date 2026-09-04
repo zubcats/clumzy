@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 
 $ReleaseUrl = 'https://github.com/zubcats/clumzy/releases/latest/download/Clumzy-windows-x64.zip'
-$ExpectBuild = '090426b'
+$ExpectBuild = '090426c'
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
