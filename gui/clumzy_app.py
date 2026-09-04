@@ -41,6 +41,7 @@ VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
 CYCLE_SETTLE_S = 0.08
+APP_BUILD = '090426'
 
 UI_BG = '#141414'
 UI_BTN = '#2b2b2b'
@@ -176,6 +177,9 @@ QLabel#noticeLabel {{
 }}
 QLabel#keybindLabel {{
     color: {UI_TEXT};
+}}
+QLabel#buildLabel {{
+    color: {UI_MUTE};
 }}
 QPushButton {{
     font-weight: normal;
@@ -528,7 +532,7 @@ class ClumzyWindow(QMainWindow):
         self._keybind_vk, self._keybind_mods = keybind_vk(self.keybind)
         self._loading_settings = True
         self._worker = None
-        self.setWindowTitle('Clumzy 2.0 | Zub Clan 2026 | Last Updated: 090326')
+        self.setWindowTitle(f'Clumzy 2.0 | Zub Clan 2026 | Build {APP_BUILD}')
         self.setObjectName('clumzyMain')
         self.setWindowIcon(load_app_icon())
 
@@ -578,6 +582,10 @@ class ClumzyWindow(QMainWindow):
         key_label = QLabel(f'Use the key {self.keybind} to toggle on/off')
         key_label.setObjectName('keybindLabel')
         info_row.addWidget(key_label, 1)
+        build_label = QLabel(f'Build {APP_BUILD}')
+        build_label.setObjectName('buildLabel')
+        build_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        info_row.addWidget(build_label)
         outer.addWidget(info_box)
 
         extra_box = QGroupBox('Extra Presets')
