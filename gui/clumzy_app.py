@@ -41,7 +41,10 @@ VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
 CYCLE_SETTLE_S = 0.08
-APP_BUILD = '090426'
+APP_BUILD = '090426b'
+# First zip of a calendar day is MMDDYY with no letter (090426).
+# Same-day updates: b, c, ... z, then b2, c2, ... z2, then b3, ...
+# Skip the letter a. Also set tools/fresh-clumzy.ps1 $ExpectBuild to match.
 
 UI_BG = '#141414'
 UI_BTN = '#2b2b2b'
